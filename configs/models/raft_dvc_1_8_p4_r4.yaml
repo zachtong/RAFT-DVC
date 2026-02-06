@@ -1,0 +1,56 @@
+# Model Configuration: RAFT-DVC with 1/8 Resolution Encoder
+# Baseline architecture with deep downsampling for computational efficiency
+
+name: "RAFT-DVC-1/8-P4-R4"
+description: >
+  Standard RAFT-DVC model with 1/8 resolution feature encoder.
+  Most computationally efficient architecture, suitable for large displacement fields.
+  Recommended for initial training and general-purpose DVC measurements.
+
+# Architecture configuration
+architecture:
+  # Encoder type: Controls downsampling factor
+  encoder_type: "1/8"  # Output resolution: 1/8 of input
+
+  # Feature encoder
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  # Context encoder
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # Correlation pyramid
+  corr_levels: 4  # 4 levels for 1/8 resolution
+  corr_radius: 4
+
+  # Update block
+  use_sep_conv: true
+
+  # Inference
+  iters: 12
+
+# Metadata
+metadata:
+  downsample_factor: 8
+  feature_map_size: "H/8 x W/8 x D/8"
+
+  # Performance estimates (for 128^3 volumes)
+  recommended_batch_size: 5
+  memory_usage_estimate: "~5-8GB"
+  training_time_relative: 1.0  # Baseline
+
+  # Capabilities
+  max_displacement_estimate: "~64 voxels (in original space)"
+  spatial_precision: "Good for voxel-level measurements"
+
+  # Recommended use cases
+  recommended_for:
+    - "Initial training and baseline experiments"
+    - "Large displacement fields"
+    - "Memory-constrained environments"
+    - "Fast inference requirements"

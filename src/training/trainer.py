@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import OneCycleLR
+from torch.optim.lr_scheduler import CyclicLR
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
 import logging
@@ -51,7 +51,7 @@ class Trainer:
         self.config = {
             'epochs': 100,
             'lr': 4e-4,
-            'weight_decay': 1e-4,
+            'weight_decay': 5e-5,  # Reduced to match volRAFT (5e-5 instead of 1e-4)
             'gamma': 0.8,  # Sequence loss gamma
             'grad_clip': 1.0,
             'iters': 12,
@@ -64,7 +64,31 @@ class Trainer:
             self.config.update(config)
         
         # Setup device
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Force CPU if CUDA compute capability is incompatible (e.g., RTX 5090 sm_120)
+        use_cuda = torch.cuda.is_available()
+        if use_cuda:
+            try:
+                # Test with operations that actually use CUDA kernels
+                # Simple operations like torch.zeros() may work even when complex kernels fail
+                x = torch.randn(2, 3, 4, 4, 4).cuda()
+                y = torch.randn(2, 3, 4, 4, 4).cuda()
+                z = torch.stack([x, y], dim=-1)  # This fails on incompatible GPUs
+                _ = torch.nn.functional.conv3d(x, torch.randn(3, 3, 3, 3, 3).cuda())
+                del x, y, z, _  # Clean up
+            except RuntimeError as e:
+                error_msg = str(e)
+                if "no kernel image is available" in error_msg or "CUDA error" in error_msg:
+                    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'Unknown'
+                    print(f"\n{'='*60}")
+                    print(f"WARNING: CUDA incompatible with your GPU")
+                    print(f"GPU: {gpu_name}")
+                    print(f"Error: {error_msg[:100]}...")
+                    print(f"Falling back to CPU mode.")
+                    print(f"For GPU support, wait for PyTorch with full sm_120 support.")
+                    print(f"{'='*60}\n")
+                    use_cuda = False
+
+        self.device = torch.device('cuda' if use_cuda else 'cpu')
         self.model = self.model.to(self.device)
         
         # Setup optimizer
@@ -74,15 +98,21 @@ class Trainer:
             weight_decay=self.config['weight_decay']
         )
         
-        # Setup scheduler
-        total_steps = len(train_loader) * self.config['epochs']
-        self.scheduler = OneCycleLR(
+        # Setup scheduler - CyclicLR with triangular2 mode (matches volRAFT)
+        # Get scheduler config with defaults
+        base_lr = self.config.get('base_lr', 2e-5)  # volRAFT default
+        max_lr = self.config.get('max_lr', 2e-4)  # volRAFT default (10x base)
+        step_size_up = self.config.get('step_size_up', 500)  # iterations
+        step_size_down = self.config.get('step_size_down', 1500)  # iterations
+
+        self.scheduler = CyclicLR(
             self.optimizer,
-            max_lr=self.config['lr'],
-            total_steps=total_steps,
-            pct_start=0.05,
-            cycle_momentum=False,
-            anneal_strategy='linear'
+            base_lr=base_lr,
+            max_lr=max_lr,
+            step_size_up=step_size_up,
+            step_size_down=step_size_down,
+            mode='triangular2',  # Amplitude decreases each cycle
+            cycle_momentum=False
         )
         
         # Setup loss
@@ -156,11 +186,12 @@ class Trainer:
                     self.config['grad_clip']
                 )
                 self.optimizer.step()
-            
+
+            # Step scheduler per batch for CyclicLR (step_size_up/down are in iterations)
             self.scheduler.step()
             self.global_step += 1
             total_loss += loss.item()
-            
+
             # Logging
             if batch_idx % self.config['log_interval'] == 0:
                 lr = self.scheduler.get_last_lr()[0]
@@ -168,7 +199,7 @@ class Trainer:
                     f"Epoch {self.epoch} [{batch_idx}/{len(self.train_loader)}] "
                     f"Loss: {loss.item():.4f} LR: {lr:.6f}"
                 )
-        
+
         return total_loss / len(self.train_loader)
     
     @torch.no_grad()
@@ -208,7 +239,7 @@ class Trainer:
     def save_checkpoint(self, filename: str = 'checkpoint.pth', is_best: bool = False):
         """Save training checkpoint."""
         checkpoint_path = self.output_dir / filename
-        
+
         self.model.save_checkpoint(
             str(checkpoint_path),
             optimizer=self.optimizer,
@@ -216,7 +247,7 @@ class Trainer:
             epoch=self.epoch,
             global_step=self.global_step,
             best_val_loss=self.best_val_loss,
-            config=self.config
+            training_config=self.config  # Save as training_config, not config
         )
         
         if is_best:

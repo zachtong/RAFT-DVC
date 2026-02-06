@@ -1,0 +1,75 @@
+# Model Configuration: RAFT-DVC with Full Resolution (1/1) Encoder
+# Ultra-high-resolution architecture with NO downsampling
+
+name: "RAFT-DVC-1/1-P2-R4"
+description: >
+  RAFT-DVC model with full resolution (no downsampling) feature encoder.
+  Maximum spatial resolution for ultra-fine displacement estimation.
+
+  ⚠️ WARNING: VERY HIGH COMPUTATIONAL COST!
+  This configuration requires significant GPU memory and training time.
+  Only recommended for small volumes or specialized research applications.
+
+# Architecture configuration
+architecture:
+  # Encoder type: Controls downsampling factor
+  encoder_type: "1/1"  # Output resolution: FULL (no downsampling)
+
+  # Feature encoder
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  # Context encoder
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # Correlation pyramid
+  corr_levels: 2  # Keep low for memory efficiency
+  corr_radius: 4
+
+  # Update block
+  use_sep_conv: true
+
+  # Inference
+  iters: 12
+
+# Metadata
+metadata:
+  downsample_factor: 1
+  feature_map_size: "H x W x D (full resolution)"
+
+  # Performance estimates (for 128^3 volumes)
+  recommended_batch_size: 1
+  memory_usage_estimate: "~30-50GB (128^3), scales cubically!"
+  training_time_relative: 10.0  # ~10x slower than 1/8
+
+  # Capabilities
+  max_displacement_estimate: "~8 voxels (in original space)"
+  spatial_precision: "Maximum theoretical precision"
+
+  # Recommended use cases
+  recommended_for:
+    - "Ultra-fine displacement measurements"
+    - "Research on full-resolution processing"
+    - "Small volume sizes (<64^3)"
+    - "Abundant GPU resources (40GB+ VRAM)"
+
+  # Warnings and limitations
+  warnings:
+    - "Extremely memory intensive: ~30-50GB for 128^3 volumes"
+    - "Training time ~10x longer than 1/8 baseline"
+    - "May require gradient checkpointing for large volumes"
+    - "Limited by GPU memory - reduce batch size to 1"
+    - "Consider using 1/2 encoder instead for most applications"
+
+  notes: >
+    This configuration is provided for completeness and research purposes.
+    For practical DVC applications, the 1/2 or 1/4 encoder typically provides
+    the best balance of precision and computational efficiency.
+
+    Memory scaling is O(N^3) where N is volume dimension, so even modest
+    increases in volume size dramatically increase memory requirements.

@@ -296,3 +296,342 @@ class ContextEncoder(nn.Module):
         net = torch.tanh(net)
         context = torch.relu(context)
         return net, context
+
+
+class MediumEncoder(nn.Module):
+    """
+    Medium 3D encoder with 1/4 resolution output.
+
+    Balanced between computational efficiency and spatial resolution.
+    Suitable for moderate displacement fields.
+
+    Architecture:
+        - Initial conv: stride=2 → 1/2 resolution
+        - Layer1: stride=1 → 1/2 resolution
+        - Layer2: stride=2 → 1/4 resolution
+        - Layer3: stride=1 → 1/4 resolution (no further downsampling)
+
+    Args:
+        input_dim: Number of input channels (default: 1)
+        output_dim: Number of output feature channels
+        norm_fn: Normalization type ('batch', 'instance', 'group', 'none')
+        dropout: Dropout probability
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 1,
+        output_dim: int = 128,
+        norm_fn: str = 'instance',
+        dropout: float = 0.0
+    ):
+        super().__init__()
+        self.norm_fn = norm_fn
+        self.output_dim = output_dim
+
+        # Initial convolution
+        self.conv1 = nn.Conv3d(input_dim, 32, kernel_size=7, stride=2, padding=3)
+        self.norm1 = self._get_norm_layer(norm_fn, 32)
+        self.relu1 = nn.ReLU(inplace=True)
+
+        # Residual layers (output stride = 4)
+        self.in_planes = 32
+        self.layer1 = self._make_layer(32, stride=1)   # /2
+        self.layer2 = self._make_layer(64, stride=2)   # /4
+        self.layer3 = self._make_layer(96, stride=1)   # /4 (no change)
+
+        # Output projection
+        self.conv2 = nn.Conv3d(96, output_dim, kernel_size=1)
+
+        # Dropout
+        self.dropout = nn.Dropout3d(p=dropout) if dropout > 0 else None
+
+        # Initialize weights
+        self._init_weights()
+
+    def _get_norm_layer(self, norm_fn: str, planes: int) -> nn.Module:
+        """Create normalization layer."""
+        if norm_fn == 'group':
+            return nn.GroupNorm(num_groups=max(1, planes // 8), num_channels=planes)
+        elif norm_fn == 'batch':
+            return nn.BatchNorm3d(planes)
+        elif norm_fn == 'instance':
+            return nn.InstanceNorm3d(planes)
+        elif norm_fn == 'none':
+            return nn.Identity()
+        else:
+            raise ValueError(f"Unknown norm_fn: {norm_fn}")
+
+    def _make_layer(self, dim: int, stride: int = 1) -> nn.Sequential:
+        """Create a residual layer."""
+        layer1 = BottleneckBlock3D(self.in_planes, dim, self.norm_fn, stride=stride)
+        layer2 = BottleneckBlock3D(dim, dim, self.norm_fn, stride=1)
+        self.in_planes = dim
+        return nn.Sequential(layer1, layer2)
+
+    def _init_weights(self):
+        """Initialize network weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm3d, nn.InstanceNorm3d, nn.GroupNorm)):
+                if m.weight is not None:
+                    nn.init.constant_(m.weight, 1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(
+        self,
+        x: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Forward pass."""
+        is_list = isinstance(x, (tuple, list))
+        if is_list:
+            batch_dim = x[0].shape[0]
+            x = torch.cat(x, dim=0)
+
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = self.relu1(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        x = self.conv2(x)
+
+        if self.training and self.dropout is not None:
+            x = self.dropout(x)
+
+        if is_list:
+            x = torch.split(x, [batch_dim, batch_dim], dim=0)
+
+        return x
+
+
+class ShallowEncoder(nn.Module):
+    """
+    Shallow 3D encoder with 1/2 resolution output.
+
+    Higher spatial resolution for fine displacement estimation.
+    Recommended for sub-voxel precision DVC measurements.
+
+    Architecture:
+        - Initial conv: stride=2 → 1/2 resolution
+        - Layer1: stride=1 → 1/2 resolution
+        - Layer2: stride=1 → 1/2 resolution (no downsampling)
+        - Layer3: stride=1 → 1/2 resolution (no downsampling)
+
+    Args:
+        input_dim: Number of input channels (default: 1)
+        output_dim: Number of output feature channels
+        norm_fn: Normalization type ('batch', 'instance', 'group', 'none')
+        dropout: Dropout probability
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 1,
+        output_dim: int = 128,
+        norm_fn: str = 'instance',
+        dropout: float = 0.0
+    ):
+        super().__init__()
+        self.norm_fn = norm_fn
+        self.output_dim = output_dim
+
+        # Initial convolution - only 1x downsampling
+        self.conv1 = nn.Conv3d(input_dim, 32, kernel_size=7, stride=2, padding=3)
+        self.norm1 = self._get_norm_layer(norm_fn, 32)
+        self.relu1 = nn.ReLU(inplace=True)
+
+        # Residual layers (output stride = 2, all stride=1)
+        self.in_planes = 32
+        self.layer1 = self._make_layer(32, stride=1)   # /2
+        self.layer2 = self._make_layer(64, stride=1)   # /2 (no change)
+        self.layer3 = self._make_layer(96, stride=1)   # /2 (no change)
+
+        # Output projection
+        self.conv2 = nn.Conv3d(96, output_dim, kernel_size=1)
+
+        # Dropout
+        self.dropout = nn.Dropout3d(p=dropout) if dropout > 0 else None
+
+        # Initialize weights
+        self._init_weights()
+
+    def _get_norm_layer(self, norm_fn: str, planes: int) -> nn.Module:
+        """Create normalization layer."""
+        if norm_fn == 'group':
+            return nn.GroupNorm(num_groups=max(1, planes // 8), num_channels=planes)
+        elif norm_fn == 'batch':
+            return nn.BatchNorm3d(planes)
+        elif norm_fn == 'instance':
+            return nn.InstanceNorm3d(planes)
+        elif norm_fn == 'none':
+            return nn.Identity()
+        else:
+            raise ValueError(f"Unknown norm_fn: {norm_fn}")
+
+    def _make_layer(self, dim: int, stride: int = 1) -> nn.Sequential:
+        """Create a residual layer."""
+        layer1 = BottleneckBlock3D(self.in_planes, dim, self.norm_fn, stride=stride)
+        layer2 = BottleneckBlock3D(dim, dim, self.norm_fn, stride=1)
+        self.in_planes = dim
+        return nn.Sequential(layer1, layer2)
+
+    def _init_weights(self):
+        """Initialize network weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm3d, nn.InstanceNorm3d, nn.GroupNorm)):
+                if m.weight is not None:
+                    nn.init.constant_(m.weight, 1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(
+        self,
+        x: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Forward pass."""
+        is_list = isinstance(x, (tuple, list))
+        if is_list:
+            batch_dim = x[0].shape[0]
+            x = torch.cat(x, dim=0)
+
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = self.relu1(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        x = self.conv2(x)
+
+        if self.training and self.dropout is not None:
+            x = self.dropout(x)
+
+        if is_list:
+            x = torch.split(x, [batch_dim, batch_dim], dim=0)
+
+        return x
+
+
+class FullResEncoder(nn.Module):
+    """
+    Full resolution 3D encoder with 1/1 resolution output (no downsampling).
+
+    Maximum spatial resolution for ultra-fine displacement estimation.
+    WARNING: Very high computational and memory cost!
+
+    Architecture:
+        - Initial conv: stride=1 → Full resolution
+        - Layer1: stride=1 → Full resolution
+        - Layer2: stride=1 → Full resolution
+        - Layer3: stride=1 → Full resolution
+
+    Args:
+        input_dim: Number of input channels (default: 1)
+        output_dim: Number of output feature channels
+        norm_fn: Normalization type ('batch', 'instance', 'group', 'none')
+        dropout: Dropout probability
+
+    Note:
+        For 128^3 volumes:
+        - Feature map size: 128^3 = 2,097,152 voxels
+        - Memory: ~20-30GB for batch_size=1
+        - Training time: ~10x slower than BasicEncoder
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 1,
+        output_dim: int = 128,
+        norm_fn: str = 'instance',
+        dropout: float = 0.0
+    ):
+        super().__init__()
+        self.norm_fn = norm_fn
+        self.output_dim = output_dim
+
+        # Initial convolution - NO downsampling
+        self.conv1 = nn.Conv3d(input_dim, 32, kernel_size=7, stride=1, padding=3)
+        self.norm1 = self._get_norm_layer(norm_fn, 32)
+        self.relu1 = nn.ReLU(inplace=True)
+
+        # Residual layers (all stride=1, full resolution maintained)
+        self.in_planes = 32
+        self.layer1 = self._make_layer(32, stride=1)   # /1
+        self.layer2 = self._make_layer(64, stride=1)   # /1
+        self.layer3 = self._make_layer(96, stride=1)   # /1
+
+        # Output projection
+        self.conv2 = nn.Conv3d(96, output_dim, kernel_size=1)
+
+        # Dropout
+        self.dropout = nn.Dropout3d(p=dropout) if dropout > 0 else None
+
+        # Initialize weights
+        self._init_weights()
+
+    def _get_norm_layer(self, norm_fn: str, planes: int) -> nn.Module:
+        """Create normalization layer."""
+        if norm_fn == 'group':
+            return nn.GroupNorm(num_groups=max(1, planes // 8), num_channels=planes)
+        elif norm_fn == 'batch':
+            return nn.BatchNorm3d(planes)
+        elif norm_fn == 'instance':
+            return nn.InstanceNorm3d(planes)
+        elif norm_fn == 'none':
+            return nn.Identity()
+        else:
+            raise ValueError(f"Unknown norm_fn: {norm_fn}")
+
+    def _make_layer(self, dim: int, stride: int = 1) -> nn.Sequential:
+        """Create a residual layer."""
+        layer1 = BottleneckBlock3D(self.in_planes, dim, self.norm_fn, stride=stride)
+        layer2 = BottleneckBlock3D(dim, dim, self.norm_fn, stride=1)
+        self.in_planes = dim
+        return nn.Sequential(layer1, layer2)
+
+    def _init_weights(self):
+        """Initialize network weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm3d, nn.InstanceNorm3d, nn.GroupNorm)):
+                if m.weight is not None:
+                    nn.init.constant_(m.weight, 1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(
+        self,
+        x: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Forward pass."""
+        is_list = isinstance(x, (tuple, list))
+        if is_list:
+            batch_dim = x[0].shape[0]
+            x = torch.cat(x, dim=0)
+
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = self.relu1(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        x = self.conv2(x)
+
+        if self.training and self.dropout is not None:
+            x = self.dropout(x)
+
+        if is_list:
+            x = torch.split(x, [batch_dim, batch_dim], dim=0)
+
+        return x

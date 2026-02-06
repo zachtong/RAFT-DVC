@@ -1,0 +1,132 @@
+# Configuration for 32x32x32 Synthetic Confocal Particle Dataset (Version 2)
+# For training full-resolution (1/1) RAFT-DVC model
+# Smaller and denser particles than v1, everything else identical
+
+dataset:
+  name: "confocal_particles_32_v2"
+  output_dir: "data/synthetic_confocal_32_v2"
+  volume_shape: [32, 32, 32]
+  voxel_size: 0.78 # μm per voxel
+
+  # Dataset splits
+  num_samples:
+    train: 800
+    val: 100
+    test: 100
+
+  random_seed: 43 # Different seed from v1
+
+# Particle/Bead parameters - SMALLER and MORE DENSE than v1
+particles:
+  # Radius range (in voxels) - SMALLER beads than v1
+  radius_min: 0.5 # v1: 2.5 (40% smaller)
+  radius_max: 1.0 # v1: 3.0 (33% smaller)
+  radius_distribution: "uniform" # Same as v1
+  radius_lognormal_mean: 1.1 # Same as v1 (not used for uniform)
+  radius_lognormal_std: 0.3 # Same as v1 (not used for uniform)
+
+  # Number of beads per volume - MORE beads than v1
+  # 32^3 = 32,768 voxels, target density: 0.6-1.2 beads/1000 voxels
+  count_min: 200 # v1: 10  (2x more)
+  count_max: 250 # v1: 25  (1.6x more)
+  count_stratified: true
+
+  # Intensity variation - SAME as v1
+  intensity_mean: 0.8 # Same as v1
+  intensity_std: 0.1 # Same as v1
+  intensity_min: 0.1
+  intensity_max: 1.0
+
+  # Minimum distance between bead centers - SAME as v1
+  min_distance_factor: 1.5 # Same as v1
+
+  # Safety margin from volume boundaries (voxels) - SAME as v1
+  # Particles will not be placed within this distance from edges
+  margin_voxels: 1 # Same as v1
+
+# Deformation field parameters - SAME as v1
+deformation:
+  # Type distribution - SAME as v1
+  type_probabilities:
+    affine: 0.6 # Same as v1
+    bspline: 0.4 # Same as v1
+    localized: 0.0 # Same as v1
+    combined: 0.0 # Same as v1
+
+  # Affine deformation - SAME as v1
+  affine:
+    translation_max: 0.75 # Scaled from 3.0 (3.0/4 = 0.75)
+    rotation_max: 5
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation - SAME as v1
+  bspline:
+    control_grid_size: [4, 4, 4] # Scaled from [8,8,8]
+    displacement_max: 1.5
+    displacement_min: 0.25
+    smoothness: 0.8
+
+  # Localized deformation - disabled (same as v1)
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 5.0 # Scaled from 20.0
+    radius_of_influence_min: 8 # Scaled from 30
+    radius_of_influence_max: 13 # Scaled from 50
+    decay_exponent: 2.0
+
+  # Combined deformation
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Imaging simulation - SAME as v1
+imaging:
+  # Point Spread Function
+  psf_type: "gaussian"
+  psf_sigma_min: 0
+  psf_sigma_max: 0
+
+  # Noise model - SAME as v1
+  noise_type: "poisson_gaussian"
+  snr_db_min: 30 # Same as v1
+  snr_db_max: 40 # Same as v1
+
+  # Background - SAME as v1
+  background_mean: 0.02 # Same as v1
+  background_std: 0.01 # Same as v1
+
+  # Photobleaching
+  photobleaching_enabled: true
+  photobleaching_factor_min: 0.95
+  photobleaching_factor_max: 1.0
+
+# Data generation settings
+generation:
+  parallel: false
+  num_workers: 8
+
+  # Quality control
+  quality_check:
+    enabled: true
+    min_visible_beads_ratio: 0.7
+    max_displacement_ratio: 0.5
+
+  # Visualization
+  visualize_samples: true
+  num_visualize: 5
+
+  # Save metadata
+  save_metadata: true
+
+# File format
+output:
+  volume_dtype: "float32"
+  flow_dtype: "float32"
+  compression: false
+
+  # Normalization
+  normalize_volumes: true
+  normalize_flows: false

@@ -12,7 +12,13 @@ from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from dataclasses import dataclass, field
 
-from .extractor import BasicEncoder, ContextEncoder
+from .extractor import (
+    BasicEncoder,
+    MediumEncoder,
+    ShallowEncoder,
+    FullResEncoder,
+    ContextEncoder
+)
 from .update import BasicUpdateBlock
 from .corr import CorrBlock, coords_grid_3d, upflow_3d
 
@@ -20,38 +26,42 @@ from .corr import CorrBlock, coords_grid_3d, upflow_3d
 @dataclass
 class RAFTDVCConfig:
     """Configuration for RAFT-DVC model."""
-    
+
     # Input/output configuration
     input_channels: int = 1  # Grayscale volume
-    
+
+    # Encoder type selection
+    encoder_type: str = '1/8'  # Options: '1/1', '1/2', '1/4', '1/8'
+
     # Feature encoder configuration
     feature_dim: int = 128
     encoder_norm: str = 'instance'
     encoder_dropout: float = 0.0
-    
+
     # Context encoder configuration
     hidden_dim: int = 96
     context_dim: int = 64
     context_norm: str = 'none'
     context_dropout: float = 0.0
-    
+
     # Correlation configuration
     corr_levels: int = 4
     corr_radius: int = 4
-    
+
     # Update block configuration
     use_sep_conv: bool = True
-    
+
     # Inference configuration
     iters: int = 12
-    
+
     # Training configuration
     mixed_precision: bool = False
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {
             'input_channels': self.input_channels,
+            'encoder_type': self.encoder_type,
             'feature_dim': self.feature_dim,
             'encoder_norm': self.encoder_norm,
             'encoder_dropout': self.encoder_dropout,
@@ -93,18 +103,35 @@ class RAFTDVC(nn.Module):
     
     def __init__(self, config: Optional[RAFTDVCConfig] = None):
         super().__init__()
-        
+
         self.config = config or RAFTDVCConfig()
-        
+
+        # Select encoder class based on encoder_type
+        encoder_map = {
+            '1/1': FullResEncoder,
+            '1/2': ShallowEncoder,
+            '1/4': MediumEncoder,
+            '1/8': BasicEncoder
+        }
+
+        if self.config.encoder_type not in encoder_map:
+            raise ValueError(
+                f"Invalid encoder_type: {self.config.encoder_type}. "
+                f"Must be one of: {list(encoder_map.keys())}"
+            )
+
+        encoder_class = encoder_map[self.config.encoder_type]
+
         # Feature encoder (shared for both volumes)
-        self.fnet = BasicEncoder(
+        self.fnet = encoder_class(
             input_dim=self.config.input_channels,
             output_dim=self.config.feature_dim,
             norm_fn=self.config.encoder_norm,
             dropout=self.config.encoder_dropout
         )
-        
+
         # Context encoder (only for reference volume)
+        # Uses the same encoder class as fnet
         self.cnet = ContextEncoder(
             input_dim=self.config.input_channels,
             hidden_dim=self.config.hidden_dim,
@@ -112,7 +139,14 @@ class RAFTDVC(nn.Module):
             norm_fn=self.config.context_norm,
             dropout=self.config.context_dropout
         )
-        
+        # Override the encoder inside ContextEncoder to match fnet's type
+        self.cnet.encoder = encoder_class(
+            input_dim=self.config.input_channels,
+            output_dim=self.config.hidden_dim + self.config.context_dim,
+            norm_fn=self.config.context_norm,
+            dropout=self.config.context_dropout
+        )
+
         # Update block
         self.update_block = BasicUpdateBlock(
             corr_levels=self.config.corr_levels,
@@ -121,9 +155,12 @@ class RAFTDVC(nn.Module):
             context_dim=self.config.context_dim,
             use_sep_conv=self.config.use_sep_conv
         )
-        
+
         # For mixed precision training
         self._use_amp = self.config.mixed_precision
+
+        # Compute downsample factor based on encoder type
+        self.downsample_factor = int(self.config.encoder_type.split('/')[1])
     
     def freeze_bn(self):
         """Freeze batch normalization layers."""
@@ -132,30 +169,30 @@ class RAFTDVC(nn.Module):
                 m.eval()
     
     def _initialize_flow(
-        self, 
+        self,
         volume: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Initialize flow coordinates.
-        
+
         Flow is represented as difference between two coordinate grids.
-        
+
         Args:
             volume: Input volume. Shape: (B, C, H, W, D)
-        
+
         Returns:
-            Tuple of (coords0, coords1) at 1/8 resolution
+            Tuple of (coords0, coords1) at encoder's output resolution
         """
         B, C, H, W, D = volume.shape
-        
-        # Feature maps are 1/8 resolution
-        ht = int(np.ceil(H / 8))
-        wd = int(np.ceil(W / 8))
-        dp = int(np.ceil(D / 8))
-        
+
+        # Feature maps are at 1/downsample_factor resolution
+        ht = int(np.ceil(H / self.downsample_factor))
+        wd = int(np.ceil(W / self.downsample_factor))
+        dp = int(np.ceil(D / self.downsample_factor))
+
         coords0 = coords_grid_3d(B, ht, wd, dp, device=volume.device)
         coords1 = coords_grid_3d(B, ht, wd, dp, device=volume.device)
-        
+
         return coords0, coords1
     
     def _normalize_volumes(
@@ -298,17 +335,17 @@ class RAFTDVC(nn.Module):
     ):
         """
         Save model checkpoint.
-        
+
         Args:
             path: Path to save checkpoint
             optimizer: Optimizer state to save
             scheduler: Scheduler state to save
             epoch: Current epoch number
-            **kwargs: Additional data to save
+            **kwargs: Additional data to save (e.g., training_config, best_val_loss)
         """
         checkpoint = {
             'model_state_dict': self.state_dict(),
-            'config': self.config.to_dict(),
+            'model_config': self.config.to_dict(),  # Model architecture config
             'epoch': epoch,
         }
         

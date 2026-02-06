@@ -1,0 +1,147 @@
+# Configuration for 32x32x32 Synthetic Confocal Particle Dataset (Version 3)
+# For training full-resolution (1/1) RAFT-DVC model
+#
+# V3 Goals:
+# - Larger dataset (2x size)
+# - Broader particle size range (0.5-2.0 voxels)
+# - Wide density range (sparse to dense: 50-250 particles)
+# - All 4 deformation types enabled
+# - Moderate displacement magnitudes
+
+dataset:
+  name: "confocal_particles_32_v3"
+  output_dir: "data/synthetic_confocal_32_v3"
+  volume_shape: [32, 32, 32]
+  voxel_size: 0.78 # μm per voxel
+
+  # Dataset splits - DOUBLED from v2
+  num_samples:
+    train: 1600 # v2: 800
+    val: 200 # v2: 100
+    test: 200 # v2: 100
+
+  random_seed: 45 # Different from v2 (43)
+
+# Particle/Bead parameters - WIDE RANGE OF SIZES AND DENSITIES
+particles:
+  # Radius range (in voxels) - BROADER than v2
+  radius_min: 0.5 # v2: 0.5 (same)
+  radius_max: 2.0 # v2: 1.0 (2x larger)
+
+  # Use lognormal distribution for realistic size variation
+  radius_distribution: "lognormal"
+  radius_lognormal_mean: 0.5 # exp(0.5) ≈ 1.65 voxels (median)
+  radius_lognormal_std: 0.4 # Larger std for more variation
+
+  # Number of beads per volume - WIDE RANGE (sparse to dense)
+  # 32^3 = 32,768 voxels
+  # Density range: 1.5 to 7.6 beads/1000 voxels
+  count_min: 50 # v2: 200 (sparse samples)
+  count_max: 250 # v2: 250 (dense samples)
+  count_stratified: true # Ensure even distribution across range
+
+  # Intensity variation
+  intensity_mean: 0.75 # Slightly lower for more realism
+  intensity_std: 0.15 # More variation than v2
+  intensity_min: 0.1
+  intensity_max: 1.0
+
+  # Minimum distance between bead centers
+  min_distance_factor: 1.3 # Slightly tighter than v2 (1.5) to allow denser packing
+
+  # Safety margin from volume boundaries (voxels)
+  margin_voxels: 1
+
+  # Gaussian rendering sharpness (controls diffusion spread)
+  # Formula: exp(-dist² / (gaussian_sharpness * radius²))
+  # Smaller values = sharper particles (less diffusion)
+  # Larger values = softer particles (more diffusion)
+  # Default: 2.0 (standard Gaussian), try 0.5-1.0 for sharper
+  gaussian_sharpness: 1.0
+
+# Deformation field parameters - ALL 4 TYPES ENABLED
+deformation:
+  # Type distribution - DIVERSE MIX
+  type_probabilities:
+    affine: 0.4 # v2: 0.6 (reduced to make room for others)
+    bspline: 0.3 # v2: 0.4 (reduced slightly)
+    localized: 0.2 # v2: 0.0 (NEW - localized deformations)
+    combined: 0.1 # v2: 0.0 (NEW - mixed deformations)
+
+  # Affine deformation - MODERATE (same as v2)
+  affine:
+    translation_max: 0.75 # Same as v2 (not too large)
+    rotation_max: 5 # Same as v2
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation - MODERATE (same as v2)
+  bspline:
+    control_grid_size: [4, 4, 4] # Fine grid for 32^3 volume
+    displacement_max: 1.5 # Same as v2 (moderate)
+    displacement_min: 0.25
+    smoothness: 0.8
+
+  # Localized deformation - ENABLED (NEW for v3)
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 4.0 # Moderate (not too large)
+    radius_of_influence_min: 6 # Scaled for 32^3
+    radius_of_influence_max: 12 # Scaled for 32^3
+    decay_exponent: 2.0
+
+  # Combined deformation - ENABLED (NEW for v3)
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Imaging simulation
+imaging:
+  # Point Spread Function
+  psf_type: "gaussian"
+  psf_sigma_min: 0
+  psf_sigma_max: 0
+
+  # Noise model
+  noise_type: "poisson_gaussian"
+  snr_db_min: 30
+  snr_db_max: 40
+
+  # Background
+  background_mean: 0.02
+  background_std: 0.01
+
+  # Photobleaching
+  photobleaching_enabled: true
+  photobleaching_factor_min: 0.95
+  photobleaching_factor_max: 1.0
+
+# Data generation settings
+generation:
+  parallel: false
+  num_workers: 8
+
+  # Quality control
+  quality_check:
+    enabled: true
+    min_visible_beads_ratio: 0.65 # Slightly lower to accommodate sparse samples
+    max_displacement_ratio: 0.5
+
+  # Visualization
+  visualize_samples: true
+  num_visualize: 5
+
+  # Save metadata
+  save_metadata: true
+
+# File format
+output:
+  volume_dtype: "float32"
+  flow_dtype: "float32"
+  compression: false
+
+  # Normalization
+  normalize_volumes: true
+  normalize_flows: false

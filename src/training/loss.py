@@ -13,35 +13,36 @@ from typing import List, Optional
 class EPELoss(nn.Module):
     """
     End-Point-Error (EPE) Loss.
-    
-    Computes the L2 distance between predicted and ground truth flow.
-    This is the standard metric for optical flow evaluation.
+
+    Computes the L1 distance between predicted and ground truth flow.
+    This matches volRAFT's implementation for more robust training.
     """
-    
+
     def __init__(self, reduction: str = 'mean'):
         super().__init__()
         self.reduction = reduction
-    
+
     def forward(
-        self, 
-        pred_flow: torch.Tensor, 
+        self,
+        pred_flow: torch.Tensor,
         gt_flow: torch.Tensor,
         mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Compute EPE loss.
-        
+
         Args:
             pred_flow: Predicted flow. Shape: (B, 3, H, W, D)
             gt_flow: Ground truth flow. Shape: (B, 3, H, W, D)
             mask: Optional mask for valid regions. Shape: (B, 1, H, W, D)
-        
+
         Returns:
             EPE loss (scalar)
         """
-        # L2 distance
-        epe = torch.sqrt(torch.sum((pred_flow - gt_flow) ** 2, dim=1, keepdim=True))
-        
+        # L1 distance (absolute difference) - matches volRAFT implementation
+        # Sum absolute differences across flow components (3 channels)
+        epe = torch.sum(torch.abs(pred_flow - gt_flow), dim=1, keepdim=True)
+
         if mask is not None:
             epe = epe * mask
             if self.reduction == 'mean':

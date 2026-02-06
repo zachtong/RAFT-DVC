@@ -1,0 +1,65 @@
+# RAFT-DVC 测试配置
+# 用于快速验证代码能否正常运行
+# 使用小数据集、小volume、少epochs
+
+# 数据配置
+data:
+  train_dataset: "data/test_dataset/train"
+  val_dataset: "data/test_dataset/val"
+  batch_size: 1  # 小batch，降低显存需求
+  num_workers: 0  # Windows上用0避免多进程问题
+  volume_size: [32, 32, 32]  # 小volume，快速训练
+
+# 模型配置
+model:
+  input_channels: 1
+  feature_dim: 64  # 减小特征维度（默认128→64）
+  hidden_dim: 64   # 减小hidden维度（默认96→64）
+  context_dim: 32  # 减小context维度（默认64→32）
+  corr_levels: 4
+  corr_radius: 4
+  iters: 6  # 减少迭代次数（默认12→6）加快训练
+
+# 训练配置
+training:
+  epochs: 2  # 只训练2个epoch验证代码
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  mixed_precision: false  # 先关闭混合精度，避免潜在问题
+
+# 优化器
+optimizer:
+  type: "AdamW"
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+# 学习率调度器
+scheduler:
+  type: "OneCycleLR"
+  max_lr: 0.0004
+  pct_start: 0.05
+  anneal_strategy: "cos"
+
+# 损失权重
+loss:
+  gamma: 0.8  # 指数衰减权重
+
+# Checkpoint
+checkpoint:
+  save_dir: "checkpoints/test"
+  save_freq: 1  # 每个epoch都保存
+  keep_last_n: 2
+
+# 日志
+logging:
+  log_dir: "logs/test"
+  tensorboard: false  # 关闭tensorboard加快速度
+  log_freq: 1  # 每个iteration都打印（数据少）
+
+# 设备
+device:
+  cuda: true
+  gpu_id: 0
+  deterministic: false
+  seed: 1234

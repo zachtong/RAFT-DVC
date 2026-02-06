@@ -115,5 +115,11 @@ tmp/
 # Claude Code
 .claude/
 
-# Reference repositories
+# Third-party reference code
 VolRAFT/
+
+# Temporary files and debugging
+temp_*/
+*_preview/
+debug_*.py
+visualizations/

@@ -1,0 +1,64 @@
+# Model Configuration: RAFT-DVC with 1/2 Resolution Encoder
+# High-resolution architecture for fine displacement estimation
+
+name: "RAFT-DVC-1/2-P2-R4"
+description: >
+  RAFT-DVC model with 1/2 resolution feature encoder (shallow downsampling).
+  High spatial resolution for sub-voxel precision DVC measurements.
+  Inspired by RAFT-DIC findings that reduced pyramid levels improve sub-pixel accuracy.
+  RECOMMENDED for fine-scale deformation analysis.
+
+# Architecture configuration
+architecture:
+  # Encoder type: Controls downsampling factor
+  encoder_type: "1/2"  # Output resolution: 1/2 of input
+
+  # Feature encoder
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  # Context encoder
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # Correlation pyramid
+  corr_levels: 2  # 2 levels for fine-scale precision
+  corr_radius: 4
+
+  # Update block
+  use_sep_conv: true
+
+  # Inference
+  iters: 12
+
+# Metadata
+metadata:
+  downsample_factor: 2
+  feature_map_size: "H/2 x W/2 x D/2"
+
+  # Performance estimates (for 128^3 volumes)
+  recommended_batch_size: 2
+  memory_usage_estimate: "~18-25GB"
+  training_time_relative: 4.0  # ~4x slower than 1/8
+
+  # Capabilities
+  max_displacement_estimate: "~16 voxels (in original space)"
+  spatial_precision: "Excellent for sub-voxel precision"
+
+  # Recommended use cases
+  recommended_for:
+    - "High-precision DVC measurements"
+    - "Sub-voxel displacement estimation"
+    - "Fine-scale deformation analysis"
+    - "Small to moderate displacement fields"
+    - "GPU memory: 24GB+"
+
+  # Notes
+  notes: >
+    This configuration follows the RAFT-DIC paper's finding that
+    reducing correlation pyramid levels (from 4 to 2) improves
+    sub-pixel accuracy for Digital Image Correlation tasks.

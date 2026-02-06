@@ -1,0 +1,28 @@
+# Inference strategy: accurate
+# Two-stage: coarse localization + fine refinement
+# Best sub-voxel precision, slower speed.
+
+name: accurate
+description: >
+  Two-stage strategy for maximum precision.
+  Stage 1 uses 1/4 internal downsampling with a 4-level pyramid
+  to quickly capture large displacements.
+  Stage 2 operates at full resolution with a 2-level pyramid
+  to refine to sub-voxel accuracy.
+
+stages:
+  - name: coarse
+    model: coarse_p4_r4
+    internal_downsample: 4
+    tile_size: 32
+    overlap: 8
+    iters: 12
+    weight_type: cosine
+
+  - name: fine
+    model: fine_p2_r4
+    internal_downsample: 1
+    tile_size: 32
+    overlap: 8
+    iters: 12
+    weight_type: cosine

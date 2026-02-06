@@ -140,13 +140,13 @@ class CorrBlock:
             Correlation volume. Shape: (B, H, W, D, 1, H, W, D)
         """
         batch, dim, ht, wd, dp = fmap1.shape
-        
-        fmap1_flat = fmap1.view(batch, dim, ht * wd * dp)
-        fmap2_flat = fmap2.view(batch, dim, ht * wd * dp)
-        
+
+        fmap1_flat = fmap1.reshape(batch, dim, ht * wd * dp)
+        fmap2_flat = fmap2.reshape(batch, dim, ht * wd * dp)
+
         # Dot product correlation
         corr = torch.matmul(fmap1_flat.transpose(1, 2), fmap2_flat)
-        corr = corr.view(batch, ht, wd, dp, 1, ht, wd, dp)
+        corr = corr.reshape(batch, ht, wd, dp, 1, ht, wd, dp)
         
         # Normalize by feature dimension
         corr = corr / torch.sqrt(torch.tensor(dim, dtype=torch.float32, device=corr.device))
@@ -182,12 +182,12 @@ class CorrBlock:
             
             # Compute sampling coordinates at this pyramid level
             centroid_lvl = coords.reshape(batch * h1 * w1 * d1, 1, 1, 1, 3) / 2**i
-            delta_lvl = delta.view(1, 2*r+1, 2*r+1, 2*r+1, 3)
+            delta_lvl = delta.reshape(1, 2*r+1, 2*r+1, 2*r+1, 3)
             coords_lvl = centroid_lvl + delta_lvl
             
             # Sample from correlation volume
             corr_sampled = bilinear_sampler_3d(corr, coords_lvl)
-            corr_sampled = corr_sampled.view(batch, h1, w1, d1, -1)
+            corr_sampled = corr_sampled.reshape(batch, h1, w1, d1, -1)
             out_pyramid.append(corr_sampled)
         
         out = torch.cat(out_pyramid, dim=-1)

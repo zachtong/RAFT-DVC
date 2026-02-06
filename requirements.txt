@@ -1,28 +1,35 @@
-# Core dependencies
+# RAFT-DVC Dependencies
+# This project was developed and tested on NVIDIA RTX 5090 (24GB VRAM)
+# Recommended: CUDA-capable GPU with at least 16GB VRAM for training 128³ volumes
+
+# Deep Learning Framework
 torch>=2.0.0
 torchvision>=0.15.0
-numpy>=1.24.0
-scipy>=1.10.0
-matplotlib>=3.7.0
-tqdm>=4.65.0
-pyyaml>=6.0
-pillow>=9.5.0
 
-# Data handling
-h5py>=3.8.0
-nibabel>=5.1.0        # For NIfTI format
-tifffile>=2023.4.12   # For TIFF stacks
+# Scientific Computing
+numpy>=1.21.0,<2.0.0
+scipy>=1.7.0
 
-# Visualization (GUI - to be installed later)
-# PyQt6>=6.5.0
-# pyvista>=0.39.0
-# vtk>=9.2.0
+# Data Processing
+pyyaml>=5.4
+h5py>=3.0.0
 
-# Development
-pytest>=7.3.0
-black>=23.3.0
-flake8>=6.0.0
+# Visualization
+matplotlib>=3.3.0
+seaborn>=0.11.0
 
-# Utilities
-tensorboard>=2.13.0
-einops>=0.6.1
+# Progress Tracking
+tqdm>=4.60.0
+
+# Logging and Monitoring
+tensorboard>=2.8.0
+
+# Optional: For memory profiling
+# psutil>=5.8.0
+
+# Optional: For 3D visualization
+# mayavi>=4.7.0
+# vtk>=9.0.0
+
+# Note: For optimal performance on RTX 5090, install PyTorch with CUDA support:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121

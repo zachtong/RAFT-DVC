@@ -1,0 +1,56 @@
+# Model Configuration: RAFT-DVC with 1/4 Resolution Encoder
+# Medium architecture balancing resolution and computational cost
+
+name: "RAFT-DVC-1/4-P3-R4"
+description: >
+  RAFT-DVC model with 1/4 resolution feature encoder.
+  Balanced architecture offering improved spatial resolution with moderate
+  computational cost. Good middle ground for sub-voxel measurements.
+
+# Architecture configuration
+architecture:
+  # Encoder type: Controls downsampling factor
+  encoder_type: "1/4"  # Output resolution: 1/4 of input
+
+  # Feature encoder
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  # Context encoder
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # Correlation pyramid
+  corr_levels: 3  # 3 levels for 1/4 resolution
+  corr_radius: 4
+
+  # Update block
+  use_sep_conv: true
+
+  # Inference
+  iters: 12
+
+# Metadata
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+
+  # Performance estimates (for 128^3 volumes)
+  recommended_batch_size: 3
+  memory_usage_estimate: "~10-15GB"
+  training_time_relative: 2.0  # ~2x slower than 1/8
+
+  # Capabilities
+  max_displacement_estimate: "~32 voxels (in original space)"
+  spatial_precision: "Improved for sub-voxel measurements"
+
+  # Recommended use cases
+  recommended_for:
+    - "Balanced precision and efficiency"
+    - "Moderate displacement fields"
+    - "Sub-voxel measurement requirements"
+    - "GPU memory: 12-16GB"
