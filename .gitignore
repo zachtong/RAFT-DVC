@@ -100,9 +100,9 @@ test_output/
 *.pt
 *.ckpt
 
-# Keep checkpoints directory but ignore contents
-checkpoints/*
-!checkpoints/.gitkeep
+# Checkpoints and experimental data (upload manually when ready)
+checkpoints/
+data_tif/
 
 # Notebooks (keep .ipynb files but ignore checkpoints)
 # *.ipynb  # Uncomment if you don't want to track notebooks
