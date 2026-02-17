@@ -9,12 +9,19 @@ from scipy.ndimage import gaussian_filter
 class ForwardWarper:
     """Forward warp beads using trilinear splatting."""
 
-    def __init__(self, volume_shape):
+    def __init__(self, volume_shape, particles_config=None):
         """
         Args:
             volume_shape: Tuple (D, H, W)
+            particles_config: Configuration dict for particles (optional)
         """
         self.volume_shape = np.array(volume_shape)
+
+        # Get margin from config, default to 1 if not provided
+        if particles_config is not None:
+            self.margin = particles_config.get('margin_voxels', 1)
+        else:
+            self.margin = 1  # Default fallback
 
     def warp_beads(self, beads, flow):
         """
@@ -39,10 +46,10 @@ class ForwardWarper:
         new_positions = positions + displacements
 
         # Check which beads are still visible (within volume bounds)
-        margin = 5  # voxels from boundary
+        # Use margin from config (consistent with bead generation)
         in_bounds = np.all(
-            (new_positions >= margin) &
-            (new_positions < self.volume_shape - margin),
+            (new_positions >= self.margin) &
+            (new_positions < self.volume_shape - self.margin),
             axis=1
         )
 

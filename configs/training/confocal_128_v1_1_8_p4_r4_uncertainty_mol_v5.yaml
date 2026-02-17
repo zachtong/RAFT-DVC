@@ -1,0 +1,74 @@
+# Training Configuration for RAFT-DVC
+# Mixture-of-Laplace (MoL) Uncertainty Estimation Experiment v5
+#
+# Based on: uncertainty_mol_v2 (b1=1.0, clamp)
+# Change: softplus instead of clamp for log_b2
+#   - clamp(min=0) kills gradients when raw log_b2 < 0 -> gradient death spiral
+#   - softplus(x) > 0 always, gradient = sigmoid(x) -> never zero
+#   - This is the ONLY difference from v2
+
+# Data settings (same as v2)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings (same as v2)
+training:
+  epochs: 300
+  batch_size: 4
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as v2)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_uncertainty_mol_v5"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_uncertainty_mol_v5"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+strategies:
+  uncertainty:
+    enabled: true
+    loss_type: "mol"
+    mol_b1: 1.0 # same as v2: strict SEA-RAFT beta1=0 -> b1=exp(0)=1.0
+    use_softplus: true # v5 change: softplus instead of clamp for log_b2

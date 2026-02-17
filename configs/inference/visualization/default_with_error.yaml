@@ -1,0 +1,74 @@
+# Default Visualization Configuration with Error Volume
+# This includes uncertainty, density, AND error volumes (3 panels)
+#
+# Usage:
+#   python inference_test.py --checkpoint ... --viz-config configs/inference/visualization/default_with_error.yaml
+#
+# Note: Error volume only appears when ground truth flow is available in the dataset
+
+# Camera settings
+camera:
+  elevation: 25 # Camera elevation angle (degrees)
+  azimuth: 135 # Camera azimuth angle (degrees)
+  zoom: 0.6 # Zoom factor
+
+# Uncertainty volume (left panel) settings
+uncertainty:
+  opacity: 1.0 # Opacity of uncertainty layer (0-1)
+  opacity_mode: "adaptive" # 'adaptive' (sigmoid) or 'linear'
+  colormap: "Reds" # Matplotlib colormap
+  unit: "vx" # Unit label for color bar
+
+# Density volume (middle panel) settings
+density:
+  opacity: 0.7 # Opacity of density layer (0-1)
+  opacity_mode: "linear" # 'adaptive' or 'linear'
+  colormap: "Greens" # Matplotlib colormap
+  unit: "" # Unit label (empty = no unit)
+  threshold: 0.1 # Intensity threshold for feature detection
+  sigma: 3.0 # Gaussian blur sigma for density spread
+
+# Error volume (right panel) settings - NEW!
+error:
+  enabled: true # Enable error volume visualization
+  opacity: 1.0 # Opacity of error layer (0-1)
+  opacity_mode: "adaptive" # 'adaptive' or 'linear'
+  colormap: "hot" # Matplotlib colormap for error
+  unit: "vx" # Unit label for color bar
+  metric: "epe" # Error metric: 'epe' (endpoint error) or 'magnitude'
+
+# Input volume (beads/particles) settings
+input_volume:
+  opacity:
+    0 # Opacity of input volume overlay (0-1)
+    # Set to 0 to hide input volume entirely
+  unit: "" # Unit label for color bar
+
+# Rendering quality
+rendering:
+  window_size: [5760, 2120] # Wider resolution for 3 panels [width, height]
+  background_color: "white" # 'white' or 'black'
+
+# Visual elements
+display:
+  # Scalar bars (color bars)
+  show_scalar_bar: true # Show color bars for unc/density/error
+  show_volume_scalar_bar: true # Show color bar for input volume
+  scalar_bar_font_size: 55 # Color bar font size
+  scalar_bar_font_family: "arial" # Color bar font family
+  scalar_bar_outline: false # Outline around color bars
+
+  # Coordinate axes
+  show_axes: false # Show coordinate axes
+
+  # Bounding box
+  show_bounds: true # Show bounding box around volume
+  bounds_color: "black" # Bounding box color
+  bounds_width: 5 # Bounding box line width
+
+# Slice visualization (optional)
+slice:
+  show_slice: true # Show 2D slices below 3D volumes
+  slice_z: null # Z-index for slice (null = middle)
+  frame_color: "darkblue" # Slice frame color
+  frame_width: 5.0 # Slice frame line width

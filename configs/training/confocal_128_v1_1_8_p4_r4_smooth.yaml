@@ -1,0 +1,73 @@
+# Training Configuration for RAFT-DVC
+# Laplacian Smooth Loss Experiment
+#
+# Based on: confocal_128_v1_1_8_p4_r4.yaml (baseline)
+# Strategy: Laplacian smoothness regularization on predicted flow
+# Mode: Train from scratch (identical to baseline except smooth loss)
+# Changes vs baseline:
+#   - Laplacian smooth loss enabled (weight=0.1)
+
+# Data settings (same as baseline)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings (same as baseline)
+training:
+  epochs: 300
+  batch_size: 5
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as baseline)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_smooth"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_smooth"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+strategies:
+  laplacian_smooth:
+    enabled: true
+    weight: 5.0 # lambda_smooth (L1 now, values much larger than L2)
+    strides: [4] # multi-scale: local (3x3x3), medium (5x5x5), large (9x9x9)

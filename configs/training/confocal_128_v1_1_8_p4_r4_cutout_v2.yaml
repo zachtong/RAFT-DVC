@@ -1,0 +1,81 @@
+# Training Configuration for RAFT-DVC
+# Cutout Augmentation Experiment V2 (aggressive cutout)
+#
+# Based on: confocal_128_v1_1_8_p4_r4.yaml (baseline)
+# Strategy: Cutout augmentation with AGGRESSIVE masking (20-40% removed)
+# Mode: Fine-tune from pretrained baseline checkpoint
+# Changes vs baseline:
+#   - Lower LR (1/5 of baseline) to preserve learned features
+#   - 200 epochs fine-tuning
+#   - Resume from baseline best checkpoint
+#   - Cutout strategy enabled (aggressive: keeps 60-80% voxels)
+
+# Data settings (same as baseline)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings
+training:
+  epochs: 200
+  batch_size: 5
+
+  optimizer: "AdamW"
+  lr: 0.00002
+  weight_decay: 0.00005
+
+  # Lower LR for fine-tuning (1/5 of baseline)
+  scheduler: "CyclicLR"
+  base_lr: 0.00001 # 1e-5 (baseline: 5e-5)
+  max_lr: 0.00002 # 2e-5 (baseline: 1e-4)
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as baseline)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_cutout_v2"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_cutout_v2"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - fine-tune from baseline best (model weights only, fresh optimizer)
+checkpoint:
+  resume: null
+  finetune: "outputs/training/confocal_128_v1_1_8_p4_r4/checkpoint_best.pth"
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+# V2: Aggressive cutou
+# 70% of samples get cutout, each keeping 60-80% of voxels
+strategies:
+  cutout:
+    enabled: true
+    prob: 0.7 # 70% of samples get cutout
+    keep_min: 0.80 # keep% of voxels
+    keep_max: 0.85

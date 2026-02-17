@@ -1,0 +1,56 @@
+# Uncertainty-Only Visualization Configuration
+# Shows ONLY the uncertainty map without input volume overlay
+#
+# Usage:
+#   python inference_test.py --checkpoint ... --viz-config configs/inference/visualization/uncertainty_only.yaml
+
+# Camera settings
+camera:
+  elevation: 25
+  azimuth: 135
+  zoom: 0.4
+
+# Uncertainty volume (left panel) settings
+uncertainty:
+  opacity: 1.0
+  opacity_mode: "adaptive"
+  colormap: "Reds"
+  unit: "vx"
+
+# Density volume (right panel) settings
+density:
+  opacity: 0.7
+  opacity_mode: "linear"
+  colormap: "Greens"
+  unit: ""
+  threshold: 0.1
+  sigma: 3.0
+
+# Input volume - DISABLED (set opacity to 0)
+input_volume:
+  opacity: 0.0 # Hide input volume entirely
+  unit: ""
+
+# Rendering quality
+rendering:
+  window_size: [3840, 2120]
+  background_color: "white"
+
+# Visual elements
+display:
+  show_scalar_bar: true
+  show_volume_scalar_bar: false # No need for volume color bar since volume is hidden
+  scalar_bar_font_size: 55
+  scalar_bar_font_family: "arial"
+  scalar_bar_outline: false
+  show_axes: false
+  show_bounds: true
+  bounds_color: "black"
+  bounds_width: 5
+
+# Slice visualization
+slice:
+  show_slice: true
+  slice_z: null
+  frame_color: "darkblue"
+  frame_width: 10

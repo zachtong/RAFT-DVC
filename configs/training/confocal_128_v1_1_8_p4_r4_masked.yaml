@@ -1,0 +1,75 @@
+# Training Configuration for RAFT-DVC
+# Feature Density Masked Loss Experiment
+#
+# Based on: confocal_128_v1_1_8_p4_r4.yaml (baseline)
+# Strategy: Weight loss by feature density (bright regions weighted more)
+# Mode: Train from scratch (identical to baseline except masked loss)
+# Changes vs baseline:
+#   - Masked loss replaces standard sequence loss
+#   - Bright regions (beads) get weight ~1.0, dark regions get min_weight
+
+# Data settings (same as baseline)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings (same as baseline)
+training:
+  epochs: 300
+  batch_size: 5
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as baseline)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_masked"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_masked"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+strategies:
+  masked_loss:
+    enabled: true
+    feature_threshold: 0.1  # intensity above which is "feature"
+    density_sigma: 5.0      # Gaussian blur sigma (voxels)
+    min_weight: 0.2         # weight for featureless regions (0.2 = 20% of feature weight)

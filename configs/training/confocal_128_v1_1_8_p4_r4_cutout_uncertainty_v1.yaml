@@ -1,0 +1,82 @@
+# Training Configuration for RAFT-DVC
+# Cutout + NLL Uncertainty Experiment v1
+#
+# Strategy: Single Laplace NLL with Cutout augmentation
+#   - NLL loss: L = |e|/b + log(2b), self-balancing (optimal b = |e|)
+#   - Cutout: creates featureless regions during training, forcing model to
+#     learn high uncertainty in sparse/occluded areas
+#   - b_min floor: prevents overconfidence (b >= 0.2)
+#
+# Cutout settings: aggressive (V2-level)
+# Mode: Train from scratch
+
+# Data settings
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings
+training:
+  epochs: 300
+  batch_size: 5
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_cutout_uncertainty_v1"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_cutout_uncertainty_v1"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 12346
+
+# === Training Strategies ===
+strategies:
+  cutout:
+    enabled: true
+    prob: 0.5 # 50% of samples get cutout
+    keep_min: 0.60 # keep 60-85% of voxels (remove 15-40%)
+    keep_max: 0.85
+
+  uncertainty:
+    enabled: true
+    # loss_type defaults to "nll" (single Laplace)
+    b_min: 0.2 # floor: b >= 0.2, prevents overconfidence

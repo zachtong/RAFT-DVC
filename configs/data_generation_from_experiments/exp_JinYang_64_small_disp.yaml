@@ -1,0 +1,92 @@
+# Configuration for generating dataset from experimental TIF images
+# JinYang experiment - 64^3 with SMALL displacements matching synthetic_32_v3 training data
+# Purpose: Test whether displacement magnitude mismatch causes poor 64^3 predictions
+
+dataset_name: "exp_JinYang_64_small_disp"
+
+# Input: Raw TIF files
+input:
+  raw_data_dir: "data_tif/exp_JinYang"
+  file_pattern: "*.tif"
+  file_pattern_alternative: "*.tiff"
+  min_volume_size: [64, 64, 64]
+
+# Extraction: How to extract volumes from large TIF files
+extraction:
+  volume_size: [64, 64, 64]
+  strategy: "random"
+  total_volumes: 50
+  margin: 5
+
+  # Quality filtering - Disabled for sparse confocal data
+  min_mean_intensity: 0.0
+  min_std_intensity: 0.0
+
+# Splits: Testing only
+splits:
+  train:
+    num_samples: 0
+  val:
+    num_samples: 0
+  test:
+    num_samples: 50
+
+# Deformations: SMALL displacements matching synthetic_confocal_32_v3 training data
+deformations:
+  type_probabilities:
+    affine: 0.6
+    bspline: 0.4
+    localized: 0.0
+    combined: 0.0
+
+  # Affine: translation_max 3.0 -> 0.75 (matching training data)
+  affine:
+    translation_max: 0.75
+    rotation_max: 5
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline: displacement 5.0 -> 1.5, control grid scaled for 64^3
+  # Training used [4,4,4] on 32^3 = 8 voxels/control point
+  # For 64^3: [8,8,8] = 8 voxels/control point (same spatial frequency)
+  bspline:
+    control_grid_size: [8, 8, 8]
+    displacement_max: 1.5
+    displacement_min: 0.25
+    smoothness: 0.8
+
+  # Disabled
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 16.0
+    radius_of_influence_min: 24
+    radius_of_influence_max: 48
+    decay_exponent: 2.0
+
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Preprocessing
+preprocessing:
+  normalize: true
+  clip_percentile: [1, 99]
+  denoise: false
+  denoise_sigma: 0.5
+
+# Output
+output:
+  base_dir: "data/exp_JinYang_64_small_disp"
+  save_metadata: true
+  save_visualizations: true
+  num_visualize: 5
+
+# Quality check
+quality_check:
+  min_visible_beads_ratio: 0.0
+  max_displacement_ratio: 0.5
+
+# Reproducibility (same seed as exp_JinYang_64)
+random_seed: 5613

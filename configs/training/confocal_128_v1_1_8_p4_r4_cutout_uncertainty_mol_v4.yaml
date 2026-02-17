@@ -1,0 +1,90 @@
+# Training Configuration for RAFT-DVC
+# Cutout + Mixture-of-Laplace (MoL) Uncertainty Experiment v4
+#
+# Key idea: Cutout creates artificial "hard occlusions" (100% featureless
+# regions with zero correlation), giving MoL the bimodal error distribution
+# it needs to avoid alpha collapse.
+#
+# Without cutout, confocal data has a unimodal error distribution (no hard
+# boundary between "ordinary" and "ambiguous" voxels), causing alpha to
+# collapse to 1 (b1<b2_min) or 0 (b1=b2_min).
+#
+# With cutout:
+#   - Unmasked voxels: small errors -> alpha~1 (L1 component)
+#   - Masked voxels: large errors   -> alpha~0 (learned b2 component)
+#   -> MoL learns a meaningful uncertainty map
+#
+# MoL settings: strict SEA-RAFT (beta1=0 -> b1=1.0, beta2 in [0,10])
+# Cutout settings: aggressive (V2-level), applied to 70% of samples
+# Mode: Train from scratch (MoL head needs to co-train with flow head)
+
+# Data settings (same as baseline)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings (same as MoL v2/v3)
+training:
+  epochs: 300
+  batch_size: 4
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as baseline)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_cutout_uncertainty_mol_v4"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_cutout_uncertainty_mol_v4"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+strategies:
+  cutout:
+    enabled: true
+    prob: 0.7 # 70% of samples get cutout
+    keep_min: 0.60 # keep 60-85% of voxels (remove 15-40%)
+    keep_max: 0.85
+
+  uncertainty:
+    enabled: true
+    loss_type: "mol"
+    mol_b1: 1.0 # strict SEA-RAFT: beta1=0 -> b1=exp(0)=1.0

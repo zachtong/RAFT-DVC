@@ -1,0 +1,91 @@
+# Configuration for generating dataset from experimental TIF images
+# Example: Mohak's synthetic confocal beads experiment
+
+dataset_name: "exp_Mohak_32"
+
+# Input: Raw TIF files
+input:
+  raw_data_dir: "data_tif/exp_Mohak"
+  file_pattern: "*.tif"
+  file_pattern_alternative: "*.tiff"
+  min_volume_size: [32, 32, 32] # Skip files smaller than this
+
+# Extraction: How to extract 128^3 volumes from large TIF files
+extraction:
+  volume_size: [32, 32, 32]
+  strategy: "random" # Random extraction across all files
+  total_volumes: 50 # Total number of volumes to extract
+  margin: 5 # Distance from edges (avoid boundary artifacts)
+
+  # Quality filtering - Disabled for sparse confocal data with few bright beads
+  min_mean_intensity: 0.0 # Disabled (confocal data has mostly dark background)
+  min_std_intensity: 0.0 # Disabled (sparse beads = low overall std)
+
+# Splits: How to allocate volumes to train/val/test
+splits:
+  train:
+    num_samples: 0 # No training samples (testing only)
+  val:
+    num_samples: 0 # No validation samples
+  test:
+    num_samples: 50 # Generate 50 test samples
+
+# Deformations: Applied to each vol0 to create vol1
+deformations:
+  # Type distribution (must match DeformationGenerator format)
+  type_probabilities:
+    affine: 0.6 # 60% affine transformations
+    bspline: 0.4 # 40% B-spline deformations
+    localized: 0.0 # Disabled (too strong)
+    combined: 0.0 # Disabled
+
+  # Affine deformation parameters
+  affine:
+    translation_max: 3.0 # voxels (corresponds to [-3, 3] range)
+    rotation_max: 5 # degrees
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation parameters
+  bspline:
+    control_grid_size: [16, 16, 16] # 128/8 = 16 control points per dimension
+    displacement_max: 5.0
+    displacement_min: 1.0
+    smoothness: 0.8
+
+  # Localized deformation parameters (disabled)
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 16.0
+    radius_of_influence_min: 24
+    radius_of_influence_max: 48
+    decay_exponent: 2.0
+
+  # Combined deformation parameters (disabled)
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Preprocessing: Applied to extracted volumes
+preprocessing:
+  normalize: true # Normalize to [0, 1]
+  clip_percentile: [1, 99] # Clip extreme values
+  denoise: false # Optional denoising
+  denoise_sigma: 0.5 # Gaussian filter sigma (if denoise=true)
+
+# Output: Where to save the dataset
+output:
+  base_dir: "data/exp_Mohak_32" # Output directory (same level as synthetic datasets)
+  save_metadata: true # Save metadata JSON files
+  save_visualizations: true # Save visualization PNG files
+  num_visualize: 5 # Number of samples to visualize per split
+
+# Quality check: Quality control thresholds
+quality_check:
+  min_visible_beads_ratio: 0.0 # Disable for real data (no bead tracking)
+  max_displacement_ratio: 0.5 # Maximum displacement relative to volume size
+
+# Reproducibility
+random_seed: 56132

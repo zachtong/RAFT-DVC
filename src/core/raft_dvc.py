@@ -57,6 +57,23 @@ class RAFTDVCConfig:
     # Training configuration
     mixed_precision: bool = False
 
+    # Uncertainty estimation
+    # uncertainty_mode: "none" | "nll" | "mol"
+    uncertainty_mode: str = "none"
+
+    def __post_init__(self):
+        """Validate uncertainty_mode."""
+        if self.uncertainty_mode not in ("none", "nll", "mol"):
+            raise ValueError(
+                f"Invalid uncertainty_mode: {self.uncertainty_mode!r}. "
+                f"Must be one of: 'none', 'nll', 'mol'"
+            )
+
+    @property
+    def predict_uncertainty(self) -> bool:
+        """Derived property for backward compatibility."""
+        return self.uncertainty_mode != "none"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {
@@ -74,12 +91,21 @@ class RAFTDVCConfig:
             'use_sep_conv': self.use_sep_conv,
             'iters': self.iters,
             'mixed_precision': self.mixed_precision,
+            'uncertainty_mode': self.uncertainty_mode,
         }
-    
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'RAFTDVCConfig':
-        """Create config from dictionary."""
-        return cls(**{k: v for k, v in config_dict.items() if k in cls.__dataclass_fields__})
+        """Create config from dictionary.
+
+        Handles backward compatibility: old checkpoints store
+        ``predict_uncertainty: True`` instead of ``uncertainty_mode``.
+        """
+        d = {k: v for k, v in config_dict.items() if k in cls.__dataclass_fields__}
+        # Migrate legacy predict_uncertainty flag
+        if 'uncertainty_mode' not in d and config_dict.get('predict_uncertainty', False):
+            d['uncertainty_mode'] = 'nll'
+        return cls(**d)
 
 
 class RAFTDVC(nn.Module):
@@ -153,7 +179,8 @@ class RAFTDVC(nn.Module):
             corr_radius=self.config.corr_radius,
             hidden_dim=self.config.hidden_dim,
             context_dim=self.config.context_dim,
-            use_sep_conv=self.config.use_sep_conv
+            use_sep_conv=self.config.use_sep_conv,
+            uncertainty_mode=self.config.uncertainty_mode
         )
 
         # For mixed precision training
@@ -265,7 +292,7 @@ class RAFTDVC(nn.Module):
         
         fmap0 = fmap0.float()
         fmap1 = fmap1.float()
-        
+
         # Build correlation pyramid
         corr_fn = CorrBlock(
             fmap0, 
@@ -289,36 +316,50 @@ class RAFTDVC(nn.Module):
         
         # Iterative refinement
         flow_predictions = []
+        uncertainty_predictions = []
+        target_shape = (vol0.shape[2], vol0.shape[3], vol0.shape[4])
+
         for _ in range(iters):
             coords1 = coords1.detach()
-            
+
             # Lookup correlation
             corr = corr_fn(coords1)
-            
+
             # Current flow estimate
             flow = coords1 - coords0
-            
+
             # Update step
             if self._use_amp:
                 with torch.cuda.amp.autocast():
-                    net, delta_flow = self.update_block(net, context, corr, flow)
+                    net, delta_flow, log_b = self.update_block(
+                        net, context, corr, flow
+                    )
             else:
-                net, delta_flow = self.update_block(net, context, corr, flow)
-            
+                net, delta_flow, log_b = self.update_block(
+                    net, context, corr, flow
+                )
+
             # Update coordinates
             coords1 = coords1 + delta_flow
-            
+
             # Upsample flow to full resolution
-            flow_up = upflow_3d(
-                coords1 - coords0, 
-                target_shape=(vol0.shape[2], vol0.shape[3], vol0.shape[4])
-            )
-            
+            flow_up = upflow_3d(coords1 - coords0, target_shape=target_shape)
             flow_predictions.append(flow_up)
-        
+
+            # Upsample uncertainty if present
+            if log_b is not None:
+                log_b_up = upflow_3d(log_b, target_shape=target_shape)
+                uncertainty_predictions.append(log_b_up)
+
         if test_mode:
+            if uncertainty_predictions:
+                return (coords1 - coords0, flow_up,
+                        uncertainty_predictions[-1])
             return coords1 - coords0, flow_up
-        
+
+        if uncertainty_predictions:
+            return flow_predictions, uncertainty_predictions
+
         return flow_predictions
     
     def get_num_parameters(self) -> int:

@@ -1,0 +1,65 @@
+# Dark Theme Visualization Configuration with Error Volume
+# Alternative dark background style with 3 panels (uncertainty, density, error)
+#
+# Usage:
+#   python inference_test.py --checkpoint ... --viz-config configs/inference/visualization/dark_theme_with_error.yaml
+
+# Camera settings
+camera:
+  elevation: 25
+  azimuth: 135
+  zoom: 0.4
+
+# Uncertainty volume (left panel) settings
+uncertainty:
+  opacity: 1.0
+  opacity_mode: 'adaptive'
+  colormap: 'hot'              # Hot colormap looks better on dark
+  unit: 'vx'
+
+# Density volume (middle panel) settings
+density:
+  opacity: 0.8
+  opacity_mode: 'linear'
+  colormap: 'viridis'          # Viridis for better visibility on dark
+  unit: ''
+  threshold: 0.1
+  sigma: 3.0
+
+# Error volume (right panel) settings
+error:
+  enabled: true
+  opacity: 1.0
+  opacity_mode: 'adaptive'
+  colormap: 'plasma'           # Plasma colormap for error on dark background
+  unit: 'vx'
+  metric: 'epe'
+
+# Input volume settings
+input_volume:
+  opacity: 0.4                 # Slightly more visible on dark background
+  unit: ''
+
+# Rendering quality
+rendering:
+  window_size: [5760, 2120]    # Wider resolution for 3 panels
+  background_color: 'black'    # Dark background
+
+# Visual elements
+display:
+  show_scalar_bar: true
+  show_volume_scalar_bar: true
+  scalar_bar_font_size: 55
+  scalar_bar_font_family: 'arial'
+  scalar_bar_outline: true     # Outline helps on dark background
+  show_axes: false
+  show_bounds: true
+  bounds_color: 'white'        # White bounds for dark background
+  bounds_width: 5
+
+# Slice visualization
+slice:
+  show_slice: false
+  slice_z: null
+  frame_color: 'cyan'          # Brighter frame color for dark theme
+  frame_width: 3.0

@@ -1,0 +1,83 @@
+# Training Configuration for RAFT-DVC with Small Volumes (32^3)
+# Optimized for full resolution (1/1) encoder training
+#
+# NOTE: Model architecture must be specified separately via --model-config
+#       Use: configs/models/raft_dvc_1_1_p2_r4.yaml
+
+# Data settings
+data:
+  train_dir: "data/synthetic_confocal_32_v1/train"
+  val_dir: "data/synthetic_confocal_32_v1/val"
+  test_dir: "data/synthetic_confocal_32_v1/test"
+
+  # Data augmentation
+  augment: true
+
+  # Patch extraction - null means use full volume
+  patch_size: null # Use full 32^3 volumes
+
+  # Number of workers for data loading
+  num_workers: 4
+
+# Training settings
+training:
+  # Basic settings
+  epochs: 300
+  batch_size: 1 # Can use larger batch size with 32^3 volumes
+
+  # Optimizer
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  # Learning rate scheduler - CyclicLR
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  # Gradient clipping
+  clip_grad_norm: 1.0
+
+  # Mixed precision training
+  use_amp: true
+
+  # Loss weights
+  gamma: 0.8
+
+  # Validation
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings
+evaluation:
+  # Metrics to compute
+  metrics:
+    - "EPE" # End-Point Error
+    - "1px" # Percentage of pixels with EPE < 1
+    - "3px" # Percentage of pixels with EPE < 3
+    - "5px" # Percentage of pixels with EPE < 5
+
+  # Inference iterations
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_32_v1_1_1_p2_r4"
+  experiment_name: "raft_dvc_confocal_32_v1_1_1_p2_r4"
+
+  # Logging
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint
+checkpoint:
+  resume: null # Set to checkpoint path to resume training
+  save_best: true
+
+# Hardware
+device: "cuda"
+seed: 42

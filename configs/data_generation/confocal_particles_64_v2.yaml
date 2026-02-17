@@ -1,0 +1,142 @@
+# Configuration for 64x64x64 Synthetic Confocal Particle Dataset (Version 1)
+# Identical parameters to confocal_particles_32_v3.yaml except for volume size
+#
+# V1 Goals:
+# - Same particle size range as 32_v3 (0.5-2.0 voxels)
+# - Same density range as 32_v3 (50-250 particles) - NOTE: much sparser for 64^3
+# - Same deformation parameters
+# - Used to test size-invariance of trained model
+
+dataset:
+  name: "confocal_particles_64_v2"
+  output_dir: "data/synthetic_confocal_64_v2"
+  volume_shape: [64, 64, 64] # ONLY DIFFERENCE: 64 instead of 32
+  voxel_size: 0.78 # μm per voxel
+
+  # Dataset splits - Same as 32_v3
+  num_samples:
+    train: 800
+    val: 100
+    test: 100
+
+  random_seed: 46 # Different seed from 32_v3 (45)
+
+# Particle/Bead parameters - IDENTICAL to 32_v3
+particles:
+  # Radius range (in voxels) - Same as 32_v3
+  radius_min: 2
+  radius_max: 2.5
+
+  # Use lognormal distribution for realistic size variation
+  radius_distribution: "lognormal"
+  radius_lognormal_mean: 0.5 # exp(0.5) ≈ 1.65 voxels (median)
+  radius_lognormal_std: 0.4
+
+  # Number of beads per volume - IDENTICAL ABSOLUTE COUNTS
+  # NOTE: 64^3 = 262,144 voxels (8x more than 32^3)
+  # So this is MUCH SPARSER: 0.19 to 0.95 beads/1000 voxels vs 1.5-7.6 in 32_v3
+  count_min: 500
+  count_max: 1200
+  count_stratified: true
+
+  # Intensity variation - Same as 32_v3
+  intensity_mean: 0.75
+  intensity_std: 0.15
+  intensity_min: 0.1
+  intensity_max: 1.0
+
+  # Minimum distance between bead centers - Same as 32_v3
+  min_distance_factor: 1.3
+
+  # Safety margin from volume boundaries (voxels) - Same as 32_v3
+  margin_voxels: 1
+
+  # Gaussian rendering sharpness - Same as 32_v3
+  gaussian_sharpness: 0.7
+
+# Deformation field parameters - IDENTICAL to 32_v3
+deformation:
+  # Type distribution - Same mix as 32_v3
+  type_probabilities:
+    affine: 0.4
+    bspline: 0.3
+    localized: 0.2
+    combined: 0.1
+
+  # Affine deformation - IDENTICAL to 32_v3
+  affine:
+    translation_max: 0.75
+    rotation_max: 5
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation - IDENTICAL to 32_v3
+  bspline:
+    control_grid_size: [4, 4, 4] # Same grid size (will be sparser in 64^3)
+    displacement_max: 1.5
+    displacement_min: 0.25
+    smoothness: 0.8
+
+  # Localized deformation - IDENTICAL to 32_v3
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 4.0
+    radius_of_influence_min: 6
+    radius_of_influence_max: 12
+    decay_exponent: 2.0
+
+  # Combined deformation - IDENTICAL to 32_v3
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Imaging simulation - IDENTICAL to 32_v3
+imaging:
+  # Point Spread Function
+  psf_type: "gaussian"
+  psf_sigma_min: 0
+  psf_sigma_max: 0
+
+  # Noise model
+  noise_type: "poisson_gaussian"
+  snr_db_min: 30
+  snr_db_max: 40
+
+  # Background
+  background_mean: 0.02
+  background_std: 0.01
+
+  # Photobleaching
+  photobleaching_enabled: true
+  photobleaching_factor_min: 0.95
+  photobleaching_factor_max: 1.0
+
+# Data generation settings - IDENTICAL to 32_v3
+generation:
+  parallel: false
+  num_workers: 8
+
+  # Quality control
+  quality_check:
+    enabled: true
+    min_visible_beads_ratio: 0.65
+    max_displacement_ratio: 0.5
+
+  # Visualization
+  visualize_samples: true
+  num_visualize: 5
+
+  # Save metadata
+  save_metadata: true
+
+# File format - IDENTICAL to 32_v3
+output:
+  volume_dtype: "float32"
+  flow_dtype: "float32"
+  compression: false
+
+  # Normalization
+  normalize_volumes: true
+  normalize_flows: false

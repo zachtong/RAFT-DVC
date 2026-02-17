@@ -3,8 +3,9 @@
 # Recommended: CUDA-capable GPU with at least 16GB VRAM for training 128³ volumes
 
 # Deep Learning Framework
-torch>=2.0.0
-torchvision>=0.15.0
+# RTX 5090 (sm_120) requires PyTorch 2.4.0+ for proper CUDA support
+torch==2.4.1
+torchvision==0.19.1
 
 # Scientific Computing
 numpy>=1.21.0,<2.0.0
@@ -13,6 +14,8 @@ scipy>=1.7.0
 # Data Processing
 pyyaml>=5.4
 h5py>=3.0.0
+tifffile>=2021.0.0      # For loading experimental TIF images
+imagecodecs>=2021.0.0   # TIF compression codecs support
 
 # Visualization
 matplotlib>=3.3.0
@@ -27,9 +30,14 @@ tensorboard>=2.8.0
 # Optional: For memory profiling
 # psutil>=5.8.0
 
-# Optional: For 3D visualization
-# mayavi>=4.7.0
-# vtk>=9.0.0
+# Optional: For high-quality 3D volume rendering (uncertainty visualization)
+# pyvista>=0.38.0
+# Note: The visualization module works without PyVista (uses matplotlib as fallback),
+#       but PyVista provides significantly better rendering quality for 3D volumes.
 
-# Note: For optimal performance on RTX 5090, install PyTorch with CUDA support:
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Installation Notes for RTX 5090:
+# 1. Install NumPy first: pip install numpy==1.26.4
+# 2. RTX 5090 requires PyTorch nightly with CUDA 12.8:
+#    pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+# 3. For other GPUs (RTX 3090/4090 etc.), use stable PyTorch with CUDA 12.1:
+#    pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121

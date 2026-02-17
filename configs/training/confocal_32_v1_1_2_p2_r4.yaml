@@ -1,0 +1,84 @@
+# Training Configuration for RAFT-DVC
+# Fine-scale training settings (for high-resolution models like 1/2 encoder)
+#
+# NOTE: Model architecture must be specified separately via --model-config
+#       Recommended to use with configs/models/raft_dvc_1_2_p2_r4.yaml
+
+# Data settings
+data:
+  train_dir: "data/synthetic_confocal_32_v1/train"
+  val_dir: "data/synthetic_confocal_32_v1/val"
+  test_dir: "data/synthetic_confocal_32_v1/test"
+
+  # Data augmentation
+  augment: true # Random flips and rotations
+
+  # Patch extraction (set to null to use full volumes)
+  # For 128^3 volumes, can train on full size or patches
+  patch_size: null # [64, 64, 64] for patches, null for full volume
+
+  # Number of workers for data loading
+  num_workers: 4
+
+# Training settings
+training:
+  # Basic settings
+  epochs: 300 # Extended from 100 to 300 for continued training
+  batch_size: 4 # For 1/2 resolution encoder, must use batch_size=1 due to memory
+
+  # Optimizer
+  optimizer: "AdamW"
+  lr: 0.0001 # This is used by optimizer, but scheduler controls actual LR
+  weight_decay: 0.00005 # Reduced to match volRAFT (5e-5 instead of 1e-4)
+
+  # Learning rate scheduler - CyclicLR (matches volRAFT)
+  scheduler: "CyclicLR"
+  base_lr: 0.00005 # 5e-5 - Higher starting LR for continued training
+  max_lr: 0.0001 # 1e-4 - Lower peak LR (half of original)
+  step_size_up: 500 # Iterations to ramp up (matches volRAFT)
+  step_size_down: 1500 # Iterations to ramp down (matches volRAFT)
+  mode: "triangular2" # Amplitude decreases each cycle
+
+  # Gradient clipping
+  clip_grad_norm: 1.0
+
+  # Mixed precision training
+  use_amp: true # Automatic Mixed Precision (saves memory)
+
+  # Loss weights (RAFT uses gamma-weighted loss)
+  gamma: 0.8 # Exponential weight for intermediate predictions
+
+  # Validation
+  val_freq: 5 # Validate every N epochs
+  save_freq: 10 # Save checkpoint every N epochs
+
+# Evaluation settings
+evaluation:
+  # Metrics to compute
+  metrics:
+    - "EPE" # End-Point Error
+    - "1px" # Percentage of pixels with EPE < 1
+    - "3px" # Percentage of pixels with EPE < 3
+    - "5px" # Percentage of pixels with EPE < 5
+
+  # Inference iterations (can be different from training)
+  iters: 12 # More iterations for better accuracy during eval
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_32_v1_1_2_p2_r4"
+  experiment_name: "raft_dvc_confocal_32_v1_1_2_p2_r4"
+
+  # Logging
+  log_freq: 10 # Log every N iterations
+  tensorboard: true
+  save_visualizations: true # Save sample predictions during validation
+
+# Checkpoint
+checkpoint:
+  resume: # Resume from the latest model
+  save_best: true # Save best model based on validation EPE
+
+# Hardware
+device: "cuda" # or "cpu"
+seed: 42

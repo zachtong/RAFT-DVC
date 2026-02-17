@@ -49,7 +49,8 @@ class DatasetGenerator:
                                       self.config['particles'])
         self.renderer = BeadRenderer(self.volume_shape,
                                      self.config['particles'])
-        self.warper = ForwardWarper(self.volume_shape)
+        self.warper = ForwardWarper(self.volume_shape,
+                                     self.config['particles'])
         self.imaging = ImagingSimulator(self.config['imaging'])
         self.qc = QualityChecker(self.config['generation']['quality_check'])
 
@@ -204,6 +205,12 @@ class DatasetGenerator:
                         vis_dir / f'sample_{idx:04d}.png',
                         idx
                     )
+                    # 3D volume rendering
+                    self.qc.visualize_3d_sample(
+                        sample_data,
+                        vis_dir / f'sample_{idx:04d}_3d.png',
+                        idx
+                    )
 
         else:
             # Sequential generation (easier for debugging)
@@ -225,6 +232,12 @@ class DatasetGenerator:
                     self.qc.visualize_sample(
                         sample_data,
                         vis_dir / f'sample_{idx:04d}.png',
+                        idx
+                    )
+                    # 3D volume rendering
+                    self.qc.visualize_3d_sample(
+                        sample_data,
+                        vis_dir / f'sample_{idx:04d}_3d.png',
                         idx
                     )
 

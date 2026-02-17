@@ -1,0 +1,150 @@
+# Configuration for 128x128x128 Synthetic Confocal Particle Dataset (Version 3)
+# For training RAFT-DVC model at 1/4 resolution
+#
+# V3 Goals (sparse features):
+# - Much lower particle density than v2 (50-400 vs 200-2000)
+# - Smaller particle radii (0.5-1.5 vs 0.8-3.0)
+# - Sharper particle rendering (gaussian_sharpness = 0.5 vs 1.0)
+# - Designed for sparse feature scenarios (e.g., confocal bead images with low seeding)
+# - All 4 deformation types enabled (same as v2)
+
+dataset:
+  name: "confocal_particles_128_v4"
+  output_dir: "data/synthetic_confocal_128_v4"
+  volume_shape: [128, 128, 128]
+  voxel_size: 0.78 # um per voxel
+
+  # Dataset splits - same as v1
+  num_samples:
+    train: 800
+    val: 100
+    test: 100
+
+  random_seed: 50 # Different from v1 (42), v2 (46)
+
+# Particle/Bead parameters - MUCH SPARSER AND SMALLER
+particles:
+  # Radius range (in voxels) - SMALLER than v2
+  # v1: 2.5-3.0 (large, narrow)
+  # v2: 0.8-3.0 (wide range)
+  # v3: 0.5-1.5 (small, focused on sub-voxel to 1-2 voxel particles)
+  radius_min: 0.8
+  radius_max: 3.0
+
+  # Use lognormal distribution for realistic size variation
+  radius_distribution: "lognormal"
+  radius_lognormal_mean: 0.0 # exp(0.0) = 1.0 voxel (median)
+  radius_lognormal_std: 0.3 # Tighter distribution around small sizes
+
+  # Number of beads per volume - MUCH LOWER (sparse)
+  # 128^3 = 2,097,152 voxels
+  # v1: 400-1500  (density: 0.19-0.71 beads/1000 voxels)
+  # v2: 200-2000  (density: 0.095-0.95 beads/1000 voxels)
+  # v3: 100-300    (density: 0.024-0.19 beads/1000 voxels) - very sparse
+  count_min: 800 # Very sparse samples
+  count_max: 1200 # Upper end matches v1 lower end
+  count_stratified: true # Ensure even distribution across range
+
+  # Intensity variation
+  intensity_mean: 0.8
+  intensity_std: 0.15
+  intensity_min: 0.1
+  intensity_max: 1.0
+
+  # Minimum distance between bead centers
+  min_distance_factor: 1.2 # Relaxed (sparse = less overlap risk)
+
+  # Safety margin from volume boundaries (voxels)
+  margin_voxels: 1
+
+  # Gaussian rendering sharpness
+  # Controls particle diffusion/sharpness
+  # Smaller values = sharper particles (less diffusion)
+  # v1: 2.0 (default, soft), v2: 1.0 (sharp), v3: 0.5 (very sharp)
+  gaussian_sharpness: 0.8
+
+# Deformation field parameters - same as v2
+deformation:
+  type_probabilities:
+    affine: 0.4
+    bspline: 0.3
+    localized: 0.2
+    combined: 0.1
+
+  # Affine deformation
+  affine:
+    translation_max: 3.0
+    rotation_max: 5
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation
+  bspline:
+    control_grid_size: [8, 8, 8]
+    displacement_max: 6.0
+    displacement_min: 1.0
+    smoothness: 0.8
+
+  # Localized deformation
+  localized:
+    num_centers_min: 1
+    num_centers_max: 2
+    center_displacement_max: 16.0
+    radius_of_influence_min: 24
+    radius_of_influence_max: 48
+    decay_exponent: 2.0
+
+  # Combined deformation
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Imaging simulation
+imaging:
+  # Point Spread Function
+  psf_type: "gaussian"
+  psf_sigma_min: 0
+  psf_sigma_max: 0
+
+  # Noise model
+  noise_type: "poisson_gaussian"
+  snr_db_min: 30
+  snr_db_max: 40
+
+  # Background
+  background_mean: 0.02
+  background_std: 0.01
+
+  # Photobleaching
+  photobleaching_enabled: true
+  photobleaching_factor_min: 0.95
+  photobleaching_factor_max: 1.0
+
+# Data generation settings
+generation:
+  parallel: false
+  num_workers: 8
+
+  # Quality control
+  quality_check:
+    enabled: true
+    min_visible_beads_ratio: 0.5 # Lower threshold for sparse samples
+    max_displacement_ratio: 0.5
+
+  # Visualization
+  visualize_samples: true
+  num_visualize: 5
+
+  # Save metadata
+  save_metadata: true
+
+# File format
+output:
+  volume_dtype: "float32"
+  flow_dtype: "float32"
+  compression: false
+
+  # Normalization
+  normalize_volumes: true
+  normalize_flows: false

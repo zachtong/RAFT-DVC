@@ -1,0 +1,130 @@
+# Configuration for 128x128x128 Synthetic Confocal Particle Dataset
+# RAFT-DVC Project
+
+dataset:
+  name: "confocal_particles_128_v1"
+  output_dir: "data/synthetic_confocal_128_v1"
+  volume_shape: [128, 128, 128]
+  voxel_size: 0.78 # μm per voxel
+
+  # Dataset splits
+  num_samples:
+    train: 800
+    val: 100
+    test: 100
+
+  random_seed: 42
+
+# Particle/Bead parameters (will be randomly sampled per sample)
+particles:
+  # Radius range (in voxels)
+  radius_min: 2.5
+  radius_max: 3
+  radius_distribution: "uniform" # or "lognormal"
+  radius_lognormal_mean: 1.1 # np.log(3.0)
+  radius_lognormal_std: 0.3
+
+  # Number of beads per volume
+  count_min: 400
+  count_max: 1500
+  count_stratified: true # Ensure uniform distribution across density levels
+
+  # Intensity variation
+  intensity_mean: 0.8
+  intensity_std: 0.1
+  intensity_min: 0.1
+  intensity_max: 1.0
+
+  # Minimum distance between bead centers (to avoid overlap)
+  min_distance_factor: 1.5 # multiply by radius
+
+  # Safety margin from volume boundaries (voxels)
+  # Particles will not be placed within this distance from edges
+  margin_voxels: 5
+
+# Deformation field parameters
+deformation:
+  # Type distribution (probabilities must sum to 1.0)
+  type_probabilities:
+    affine: 0.6 # Increased - simpler deformations
+    bspline: 0.4 # Kept same
+    localized: 0.0 # Disabled - causes very large flows
+    combined: 0.0 # Disabled - too complex
+
+  # Affine deformation
+  affine:
+    translation_max: 3.0 # voxels (reduced from 5.0)
+    rotation_max: 5 # degrees
+    scale_min: 0.97
+    scale_max: 1.03
+    shear_max: 0.02
+
+  # B-spline deformation
+  bspline:
+    control_grid_size: [8, 8, 8] # Number of control points
+    displacement_max: 5 # voxels
+    displacement_min: 1
+    smoothness: 0.8 # Higher = smoother
+
+  # Localized deformation (simulates local compression, indentation, etc.)
+  localized:
+    num_centers_min: 1
+    num_centers_max: 3
+    center_displacement_max: 20.0 # voxels at center
+    radius_of_influence_min: 30 # voxels
+    radius_of_influence_max: 50
+    decay_exponent: 2.0 # Radial decay: exp(-r^decay_exponent)
+
+  # Combined deformation (affine + bspline)
+  combined:
+    affine_weight: 0.3
+    bspline_weight: 0.7
+
+# Imaging simulation parameters
+imaging:
+  # Point Spread Function (PSF)
+  psf_type: "gaussian"
+  psf_sigma_min: 0 # voxels
+  psf_sigma_max: 0
+
+  # Noise model: Poisson (photon counting) + Gaussian (readout)
+  noise_type: "poisson_gaussian"
+  snr_db_min: 30 # Lower SNR = more noise
+  snr_db_max: 40 # Higher SNR = cleaner
+
+  # Background level
+  background_mean: 0.02
+  background_std: 0.01
+
+  # Simulate photobleaching (vol1 slightly dimmer than vol0)
+  photobleaching_enabled: true
+  photobleaching_factor_min: 0.95
+  photobleaching_factor_max: 1.0
+
+# Data generation settings
+generation:
+  parallel: false # Set to false to avoid Windows multiprocessing pickle issues
+  num_workers: 8 # Number of parallel processes (not used in sequential mode)
+
+  # Quality control
+  quality_check:
+    enabled: true
+    min_visible_beads_ratio: 0.7 # At least 70% beads should remain in FOV
+    max_displacement_ratio: 0.5 # Max displacement < 50% of volume size
+
+  # Visualization (for debugging)
+  visualize_samples: true
+  num_visualize: 5 # Save visualizations for first N samples
+
+  # Save per-sample metadata
+  save_metadata: true
+
+# File format
+output:
+  volume_dtype: "float32"
+  flow_dtype: "float32"
+  compression: false # Set to true to use .npz instead of .npy
+
+  # Normalization
+  normalize_volumes: true # Normalize to [0, 1]
+  normalize_flows: false # Keep flows in voxel units

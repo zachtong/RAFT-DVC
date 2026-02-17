@@ -14,23 +14,84 @@ from typing import Tuple, Optional
 class FlowHead(nn.Module):
     """
     Flow prediction head.
-    
+
     Predicts 3D displacement (dx, dy, dz) from hidden features.
     """
-    
+
     def __init__(self, input_dim: int = 96, hidden_dim: int = 128):
         super().__init__()
         self.conv1 = nn.Conv3d(input_dim, hidden_dim, kernel_size=3, padding=1)
         self.conv2 = nn.Conv3d(hidden_dim, 3, kernel_size=3, padding=1)  # 3 for (dx, dy, dz)
         self.relu = nn.ReLU(inplace=True)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: Hidden state. Shape: (B, C, H, W, D)
-        
+
         Returns:
             Delta flow. Shape: (B, 3, H, W, D)
+        """
+        return self.conv2(self.relu(self.conv1(x)))
+
+
+class UncertaintyHead(nn.Module):
+    """
+    Uncertainty prediction head (parallel to FlowHead).
+
+    Predicts log_b (log-scale parameter of Laplace distribution) per flow
+    component from the same GRU hidden state.  Initial bias = 0 so that
+    b = exp(0) = 1.0 at the start of training.
+    """
+
+    def __init__(self, input_dim: int = 96, hidden_dim: int = 128):
+        super().__init__()
+        self.conv1 = nn.Conv3d(input_dim, hidden_dim, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv3d(hidden_dim, 3, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        nn.init.zeros_(self.conv2.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Hidden state. Shape: (B, C, H, W, D)
+
+        Returns:
+            log_b. Shape: (B, 3, H, W, D)
+        """
+        return self.conv2(self.relu(self.conv1(x)))
+
+
+class MoLUncertaintyHead(nn.Module):
+    """
+    Mixture-of-Laplace uncertainty head.
+
+    Outputs 4 channels: 3 for log_b2 (learnable scale per flow component)
+    and 1 for logit_alpha (mixing weight).
+
+    Initialization:
+        - log_b2 bias = 0  ->  b2 starts at exp(0) = 1.0
+        - logit_alpha bias = 2.0  ->  alpha starts at sigmoid(2) ~ 0.88,
+          favoring the fixed L1 component early in training.
+    """
+
+    def __init__(self, input_dim: int = 96, hidden_dim: int = 128):
+        super().__init__()
+        self.conv1 = nn.Conv3d(input_dim, hidden_dim, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv3d(hidden_dim, 4, kernel_size=3, padding=1)  # 3 log_b2 + 1 logit_alpha
+        self.relu = nn.ReLU(inplace=True)
+        # Initialize biases: log_b2 channels = 0, logit_alpha = 2.0
+        with torch.no_grad():
+            self.conv2.bias[:3].zero_()      # log_b2
+            self.conv2.bias[3].fill_(2.0)    # logit_alpha
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Hidden state. Shape: (B, C, H, W, D)
+
+        Returns:
+            (B, 4, H, W, D): [log_b2(3ch), logit_alpha(1ch)]
         """
         return self.conv2(self.relu(self.conv1(x)))
 
@@ -192,79 +253,93 @@ class MotionEncoder(nn.Module):
 class BasicUpdateBlock(nn.Module):
     """
     Basic update block for RAFT-DVC.
-    
+
     Combines motion encoding, GRU update, and flow prediction
     for iterative flow refinement.
-    
+
     Args:
         corr_levels: Number of correlation pyramid levels
         corr_radius: Correlation lookup radius
         hidden_dim: GRU hidden dimension
         context_dim: Context feature dimension
         use_sep_conv: Whether to use separable convolutions in GRU
+        uncertainty_mode: ``"none"`` | ``"nll"`` | ``"mol"``
     """
-    
+
     def __init__(
-        self, 
+        self,
         corr_levels: int = 4,
         corr_radius: int = 4,
-        hidden_dim: int = 96, 
+        hidden_dim: int = 96,
         context_dim: int = 64,
-        use_sep_conv: bool = True
+        use_sep_conv: bool = True,
+        uncertainty_mode: str = "none"
     ):
         super().__init__()
-        
+
         motion_dim = 80 + 3  # MotionEncoder output
-        
+
         self.encoder = MotionEncoder(
             corr_levels=corr_levels,
             corr_radius=corr_radius,
             hidden_dim=80
         )
-        
+
         gru_input_dim = motion_dim + context_dim
-        
+
         if use_sep_conv:
             self.gru = SepConvGRU3D(
-                hidden_dim=hidden_dim, 
+                hidden_dim=hidden_dim,
                 input_dim=gru_input_dim
             )
         else:
             self.gru = ConvGRU3D(
-                hidden_dim=hidden_dim, 
+                hidden_dim=hidden_dim,
                 input_dim=gru_input_dim
             )
-        
+
         self.flow_head = FlowHead(
-            input_dim=hidden_dim, 
+            input_dim=hidden_dim,
             hidden_dim=128
         )
-    
+
+        if uncertainty_mode == "nll":
+            self.uncertainty_head = UncertaintyHead(input_dim=hidden_dim, hidden_dim=128)
+        elif uncertainty_mode == "mol":
+            self.uncertainty_head = MoLUncertaintyHead(input_dim=hidden_dim, hidden_dim=128)
+        else:
+            self.uncertainty_head = None
+
     def forward(
-        self, 
-        net: torch.Tensor, 
-        context: torch.Tensor, 
-        corr: torch.Tensor, 
+        self,
+        net: torch.Tensor,
+        context: torch.Tensor,
+        corr: torch.Tensor,
         flow: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """
         Update block forward pass.
-        
+
         Args:
             net: Hidden state. Shape: (B, hidden_dim, H, W, D)
             context: Context features. Shape: (B, context_dim, H, W, D)
             corr: Correlation features. Shape: (B, corr_dim, H, W, D)
             flow: Current flow estimate. Shape: (B, 3, H, W, D)
-        
+
         Returns:
             Tuple of:
             - Updated hidden state. Shape: (B, hidden_dim, H, W, D)
             - Delta flow. Shape: (B, 3, H, W, D)
+            - log_b (or None). Shape: (B, 3, H, W, D)
         """
         motion_features = self.encoder(flow, corr)
         inp = torch.cat([context, motion_features], dim=1)
-        
+
         net = self.gru(net, inp)
         delta_flow = self.flow_head(net)
-        
-        return net, delta_flow
+
+        log_b = None
+        if self.uncertainty_head is not None:
+            log_b = self.uncertainty_head(net)
+
+        return net, delta_flow, log_b

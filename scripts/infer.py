@@ -93,17 +93,20 @@ def infer_single_pair(
     vol1: np.ndarray,
     device: torch.device,
     iters: int = 24
-) -> np.ndarray:
+) -> tuple:
     """
     Run inference on a single volume pair.
-    
+
     Returns:
-        Flow field of shape (3, H, W, D)
+        Tuple of (flow, uncertainty) where:
+        - flow: (3, H, W, D) displacement field
+        - uncertainty: (3, H, W, D) exp(log_b), or None if model
+          has no uncertainty head
     """
     # Prepare input tensors
     vol0_t = torch.from_numpy(vol0.astype(np.float32))
     vol1_t = torch.from_numpy(vol1.astype(np.float32))
-    
+
     # Add batch and channel dimensions if needed
     if vol0_t.ndim == 3:
         vol0_t = vol0_t.unsqueeze(0).unsqueeze(0)
@@ -111,19 +114,31 @@ def infer_single_pair(
     elif vol0_t.ndim == 4:
         vol0_t = vol0_t.unsqueeze(0)
         vol1_t = vol1_t.unsqueeze(0)
-    
+
     vol0_t = vol0_t.to(device)
     vol1_t = vol1_t.to(device)
-    
+
     # Run inference
     model.eval()
     with torch.no_grad():
-        _, flow = model(vol0_t, vol1_t, iters=iters, test_mode=True)
-    
-    # Convert to numpy
-    flow = flow.squeeze(0).cpu().numpy()
-    
-    return flow
+        output = model(vol0_t, vol1_t, iters=iters, test_mode=True)
+
+    # test_mode returns 2-tuple or 3-tuple (with uncertainty)
+    flow = output[1].squeeze(0).cpu().numpy()
+
+    uncertainty = None
+    alpha = None
+    if len(output) == 3:
+        unc_raw = output[2]
+        if unc_raw.shape[1] == 4:
+            # MoL mode: channels 0-2 = log_b2, channel 3 = logit_alpha
+            uncertainty = torch.exp(unc_raw[:, :3]).squeeze(0).cpu().numpy()
+            alpha = torch.sigmoid(unc_raw[:, 3:4]).squeeze(0).cpu().numpy()
+        else:
+            # NLL mode: 3 channels = log_b
+            uncertainty = torch.exp(unc_raw).squeeze(0).cpu().numpy()
+
+    return flow, uncertainty, alpha
 
 
 def infer_sliding_window(
@@ -180,7 +195,7 @@ def infer_sliding_window(
             vol1_patch = vol1[..., h:h+ph, w:w+pw, d:d+pd]
             
             # Run inference
-            flow_patch = infer_single_pair(
+            flow_patch, _, _ = infer_single_pair(
                 model, vol0_patch, vol1_patch, device, iters
             )
             
@@ -237,10 +252,12 @@ def main():
                 overlap=args.overlap,
                 iters=args.iters
             )
+            uncertainty = None  # sliding window doesn't support uncertainty yet
+            alpha = None
         else:
             print("Running single-pass inference...")
-            flow = infer_single_pair(model, vol0, vol1, device, args.iters)
-        
+            flow, uncertainty, alpha = infer_single_pair(model, vol0, vol1, device, args.iters)
+
         # Save result
         output_path = args.output or 'flow_result.npy'
         save_flow(flow, output_path)
@@ -248,6 +265,24 @@ def main():
         print(f"Flow shape: {flow.shape}")
         print(f"Flow magnitude range: [{np.linalg.norm(flow, axis=0).min():.3f}, "
               f"{np.linalg.norm(flow, axis=0).max():.3f}]")
+
+        # Save uncertainty if available
+        if uncertainty is not None:
+            uncert_path = Path(output_path).with_name(
+                Path(output_path).stem + '_uncertainty.npy'
+            )
+            np.save(str(uncert_path), uncertainty)
+            print(f"Uncertainty saved to {uncert_path}")
+            print(f"Uncertainty range: [{uncertainty.min():.4f}, {uncertainty.max():.4f}]")
+
+        # Save alpha (confidence) if MoL mode
+        if alpha is not None:
+            alpha_path = Path(output_path).with_name(
+                Path(output_path).stem + '_alpha.npy'
+            )
+            np.save(str(alpha_path), alpha)
+            print(f"MoL alpha (confidence) saved to {alpha_path}")
+            print(f"Alpha range: [{alpha.min():.4f}, {alpha.max():.4f}]")
     
     # Batch inference
     elif args.data_dir is not None:
@@ -282,12 +317,26 @@ def main():
                     overlap=args.overlap,
                     iters=args.iters
                 )
+                uncertainty = None
+                alpha = None
             else:
-                flow = infer_single_pair(model, vol0, vol1, device, args.iters)
-            
+                flow, uncertainty, alpha = infer_single_pair(
+                    model, vol0, vol1, device, args.iters
+                )
+
             output_path = output_dir / f"flow_{vol0_path.stem}.npy"
             save_flow(flow, str(output_path))
             print(f"  Saved to {output_path}")
+
+            if uncertainty is not None:
+                uncert_path = output_dir / f"uncertainty_{vol0_path.stem}.npy"
+                np.save(str(uncert_path), uncertainty)
+                print(f"  Uncertainty saved to {uncert_path}")
+
+            if alpha is not None:
+                alpha_path = output_dir / f"alpha_{vol0_path.stem}.npy"
+                np.save(str(alpha_path), alpha)
+                print(f"  MoL alpha saved to {alpha_path}")
         
         print(f"Batch inference completed. Results in {output_dir}")
     

@@ -14,6 +14,13 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
+# Optional PyVista import for 3D rendering
+try:
+    import pyvista  # noqa: F401
+    HAS_PYVISTA = True
+except ImportError:
+    HAS_PYVISTA = False
+
 
 class QualityChecker:
     """Quality control for generated samples."""
@@ -234,6 +241,67 @@ class QualityChecker:
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
+
+    def visualize_3d_sample(self, sample_data, output_path, sample_idx):
+        """
+        Create 3D volume rendering for quality inspection using PyVista.
+
+        Renders vol0 and vol1 side-by-side as 3D volumes, reusing
+        the existing render_side_by_side_pyvista function.
+
+        Args:
+            sample_data: dict with vol0, vol1, flow, metadata
+            output_path: Path to save 3D rendering image
+            sample_idx: Sample index (for logging)
+        """
+        if not HAS_PYVISTA:
+            print("Warning: PyVista not available, skipping 3D visualization")
+            return
+
+        try:
+            # Import the existing rendering function
+            import sys
+            project_root = Path(__file__).parent.parent.parent.parent
+            if str(project_root) not in sys.path:
+                sys.path.insert(0, str(project_root))
+
+            from src.visualization.side_by_side_render import render_side_by_side_pyvista
+
+            vol0 = sample_data['vol0']
+            vol1 = sample_data['vol1']
+
+            render_side_by_side_pyvista(
+                volume=vol0,            # placeholder base layer
+                scalar_left=vol0,
+                scalar_right=vol1,
+                save_path=str(output_path),
+                volume_opacity=0,       # hide base layer, show scalars only
+                left_cmap='gray',
+                right_cmap='gray',
+                left_opacity=1.0,
+                left_opacity_mode='linear',
+                right_opacity=1.0,
+                right_opacity_mode='linear',
+                left_title='Vol0 (Reference)',
+                right_title='Vol1 (Deformed)',
+                left_unit='a.u.',
+                right_unit='a.u.',
+                background_color='white',
+                show_axes=True,
+                show_scalar_bar=True,
+                scalar_bar_vertical=True,
+                show_bounds=True,
+                bounds_color='gray',
+                bounds_width=1.0,
+                camera_elevation=30.0,
+                camera_azimuth=45.0,
+                zoom=0.7,
+                window_size=(2560, 1080),
+            )
+            print(f"  3D rendering saved: {output_path}")
+
+        except Exception as e:
+            print(f"Warning: 3D rendering failed for sample {sample_idx}: {e}")
 
 
 def analyze_dataset(dataset_path, num_samples=None):

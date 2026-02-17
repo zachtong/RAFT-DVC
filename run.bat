@@ -74,7 +74,7 @@ echo Estimated time: 8-12 hours on RTX 5090
 echo.
 pause
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 
 echo.
 echo Starting training with default configs...
@@ -224,7 +224,7 @@ echo Training: %training_config%
 echo.
 pause
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 
 echo.
 python scripts/train_confocal.py --model-config %model_config% --training-config %training_config%
@@ -285,7 +285,7 @@ set /p training_choice="Choice (1-%training_idx%): "
 set "training_config=!training_file_%training_choice%!"
 
 :RESUME_TRAINING
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 
 echo.
 echo Resuming from: %checkpoint_path%
@@ -454,7 +454,13 @@ set dataset_idx=0
 
 REM Scan for dataset directories containing train/val/test subdirs
 for /d %%D in (data\*) do (
-    if exist "%%D\val\" (
+    REM Check if directory has at least one of train/val/test subdirs
+    set valid=0
+    if exist "%%D\train\" set valid=1
+    if exist "%%D\val\" set valid=1
+    if exist "%%D\test\" set valid=1
+
+    if !valid!==1 (
         set /a dataset_idx+=1
         set "dataset_path_!dataset_idx!=%%D"
         set "dataset_name_!dataset_idx!=%%~nxD"
@@ -502,6 +508,7 @@ if %dataset_choice% lss 1 (
 )
 
 set "data_dir=!dataset_path_%dataset_choice%!"
+set "dataset_name=!dataset_name_%dataset_choice%!"
 
 goto SELECT_MODEL_CONFIG
 
@@ -515,11 +522,20 @@ if "%data_dir%"=="" (
     goto SELECT_DATASET
 )
 
-if not exist "%data_dir%\val\" (
-    echo ERROR: Invalid dataset - val/ subdirectory not found
+REM Check if dataset has at least one split directory
+set valid=0
+if exist "%data_dir%\train\" set valid=1
+if exist "%data_dir%\val\" set valid=1
+if exist "%data_dir%\test\" set valid=1
+
+if !valid!==0 (
+    echo ERROR: Invalid dataset - no train/val/test subdirectories found
     pause
     goto CUSTOM_DATASET_PATH
 )
+
+REM Extract dataset name from path
+for %%D in ("%data_dir%") do set "dataset_name=%%~nxD"
 
 goto SELECT_MODEL_CONFIG
 
@@ -688,24 +704,24 @@ set /p vis_choice="Enter your choice (1-5): "
 
 if "%vis_choice%"=="1" (
     set num_vis=3
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%vis_choice%"=="2" (
     set num_vis=10
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%vis_choice%"=="3" (
     set num_vis=-1
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%vis_choice%"=="4" (
     echo.
     set /p num_vis="Enter number of samples to visualize: "
     if "!num_vis!"=="" set num_vis=3
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%vis_choice%"=="5" goto SELECT_INFERENCE_MODE
@@ -736,14 +752,14 @@ set /p sample_choice="Enter your choice (1-3): "
 
 if "%sample_choice%"=="1" (
     set sample=90
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%sample_choice%"=="2" (
     echo.
     set /p sample="Enter sample index: "
     if "!sample!"=="" set sample=90
-    goto RUN_INFERENCE
+    goto SELECT_3D_RENDERING
 )
 
 if "%sample_choice%"=="3" goto SELECT_INFERENCE_MODE
@@ -751,6 +767,137 @@ if "%sample_choice%"=="3" goto SELECT_INFERENCE_MODE
 echo Invalid choice! Press any key to try again...
 pause >nul
 goto SELECT_SAMPLE
+
+:SELECT_3D_RENDERING
+cls
+echo ======================================================================
+echo Enable 3D Volume Rendering?
+echo ======================================================================
+echo.
+echo Checkpoint:    %checkpoint%
+echo Dataset:       %data_dir%
+echo Split:         %split%
+if "%inference_mode%"=="single" (
+    echo Mode:          Single sample ^(%sample%^)
+) else (
+    echo Mode:          Batch ^(%num_vis% samples^)
+)
+echo.
+echo 3D Volume Rendering generates high-quality side-by-side comparison:
+echo   - Left:  Uncertainty volume ^(red, from model prediction^)
+echo   - Right: Feature density volume ^(green^)
+echo   - Optional: 2D slice visualization below 3D volumes
+echo.
+echo Note: Only works for models with uncertainty head!
+echo       Uses same parameters as demo_side_by_side.py
+echo.
+echo Options:
+echo  1. Yes - Enable 3D rendering ^(high quality, slower^)
+echo  2. Yes - Enable 3D rendering with slice visualization
+echo  3. No  - Skip 3D rendering ^(faster, default^)
+echo  4. Back to previous menu
+echo.
+echo ======================================================================
+set /p render_choice="Enter your choice (1-4): "
+
+if "%render_choice%"=="1" (
+    set enable_3d_rendering=--enable_3d_rendering
+    set render_show_slice=
+    goto SELECT_VIZ_CONFIG
+)
+
+if "%render_choice%"=="2" (
+    set enable_3d_rendering=--enable_3d_rendering
+    set render_show_slice=--render_show_slice
+    goto SELECT_VIZ_CONFIG
+)
+
+if "%render_choice%"=="3" (
+    set enable_3d_rendering=
+    set render_show_slice=
+    set viz_config=
+    goto RUN_INFERENCE
+)
+
+if "%render_choice%"=="4" (
+    if "%inference_mode%"=="single" goto SELECT_SAMPLE
+    goto SELECT_NUM_VIS
+)
+
+echo Invalid choice! Press any key to try again...
+pause >nul
+goto SELECT_3D_RENDERING
+
+:SELECT_VIZ_CONFIG
+setlocal enabledelayedexpansion
+cls
+echo ======================================================================
+echo Select Visualization Configuration
+echo ======================================================================
+echo.
+echo Checkpoint:    %checkpoint%
+echo Dataset:       %data_dir%
+echo Split:         %split%
+if "%inference_mode%"=="single" (
+    echo Mode:          Single sample ^(%sample%^)
+) else (
+    echo Mode:          Batch ^(%num_vis% samples^)
+)
+echo 3D Rendering:  ENABLED
+if "%render_show_slice%"=="--render_show_slice" (
+    echo Slice Mode:    WITH slice visualization
+) else (
+    echo Slice Mode:    WITHOUT slice
+)
+echo.
+echo Available visualization configurations:
+echo.
+
+REM Dynamically scan configs/inference/visualization directory
+set idx=0
+for %%f in (configs\inference\visualization\*.yaml) do (
+    set /a idx+=1
+    set "cfg!idx!=%%~nf"
+    echo  !idx!. %%~nf
+)
+set config_count=!idx!
+
+echo  0. No config ^(use command-line defaults^)
+echo  99. Back to 3D rendering options
+echo.
+echo ======================================================================
+set /p choice="Enter your choice (0-!config_count! or 99): "
+
+if "!choice!"=="0" (
+    endlocal
+    set viz_config=
+    goto RUN_INFERENCE
+)
+
+if "!choice!"=="99" (
+    endlocal
+    goto SELECT_3D_RENDERING
+)
+
+REM Validate choice
+if !choice! gtr !config_count! (
+    endlocal
+    echo Invalid choice! Press any key to try again...
+    pause >nul
+    goto SELECT_VIZ_CONFIG
+)
+
+if !choice! lss 1 (
+    endlocal
+    echo Invalid choice! Press any key to try again...
+    pause >nul
+    goto SELECT_VIZ_CONFIG
+)
+
+REM Build config path
+call set selected=%%cfg!choice!%%
+endlocal & set viz_config=--viz-config configs/inference/visualization/%selected%.yaml
+goto RUN_INFERENCE
 
 :RUN_INFERENCE
 cls
@@ -769,46 +916,60 @@ if "%inference_mode%"=="single" (
     echo Mode:          Batch (all samples)
     echo Visualizations: %num_vis%
 )
+if "%enable_3d_rendering%"=="--enable_3d_rendering" (
+    echo 3D Rendering:  ENABLED
+    if not "%viz_config%"=="" (
+        echo Viz Config:    %viz_config:--viz-config =%
+    ) else (
+        echo Viz Config:    Command-line defaults
+    )
+) else (
+    echo 3D Rendering:  DISABLED
+)
 echo.
 
-REM Extract experiment name and checkpoint name from path
-REM Example: outputs\training\confocal_small_1_1\checkpoint_best.pth
-REM -> experiment: confocal_small_1_1
+REM Extract checkpoint name and model (experiment) name from path
+REM Example: outputs\training\confocal_128_v1_1_8_p4_r4\checkpoint_best.pth
 REM -> ckpt_name: checkpoint_best
+REM -> model_name: confocal_128_v1_1_8_p4_r4
 
 REM Get just the filename without extension
 for %%F in ("%checkpoint%") do (
     set "ckpt_name=%%~nF"
-    set "ckpt_dir=%%~dpF"
 )
 
-REM Extract experiment name (parent directory name)
-for %%D in ("%ckpt_dir:~0,-1%") do set "experiment=%%~nxD"
+REM Get the parent directory name (experiment/model name)
+for %%F in ("%checkpoint%") do (
+    set "ckpt_parent=%%~dpF"
+)
+REM Remove trailing backslash then extract folder name
+if "!ckpt_parent:~-1!"=="\" set "ckpt_parent=!ckpt_parent:~0,-1!"
+for %%D in ("!ckpt_parent!") do set "model_name=%%~nxD"
 
-REM Build output directory: outputs/inference/<experiment>/<checkpoint_name>/<split>/
-set "output_dir=outputs\inference\%experiment%\%ckpt_name%\%split%"
+REM Build output directory: outputs/inference/<model_name>_on_<dataset_name>/<checkpoint_name>/<split>/
+set "output_dir=outputs\inference\!model_name!_on_%dataset_name%\%ckpt_name%\%split%"
 
 echo Output directory: %output_dir%
 echo.
 pause
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 
 REM Build inference command based on mode
 if "%inference_mode%"=="single" (
     REM Single sample mode
     if "%model_config%"=="" (
-        python inference_test.py --checkpoint "%checkpoint%" --data_dir "%data_dir%" --split %split% --sample %sample% --output_dir "%output_dir%"
+        python inference_test.py --checkpoint "%checkpoint%" --data_dir "%data_dir%" --split %split% --sample %sample% --output_dir "%output_dir%" %enable_3d_rendering% %viz_config% %render_show_slice%
     ) else (
-        python inference_test.py --checkpoint "%checkpoint%" --model-config "%model_config%" --data_dir "%data_dir%" --split %split% --sample %sample% --output_dir "%output_dir%"
+        python inference_test.py --checkpoint "%checkpoint%" --model-config "%model_config%" --data_dir "%data_dir%" --split %split% --sample %sample% --output_dir "%output_dir%" %enable_3d_rendering% %viz_config% %render_show_slice%
     )
 ) else (
     REM Batch mode (all samples)
     if "%model_config%"=="" (
-        python inference_test.py --checkpoint "%checkpoint%" --data_dir "%data_dir%" --split %split% --num_vis %num_vis% --output_dir "%output_dir%"
+        python inference_test.py --checkpoint "%checkpoint%" --data_dir "%data_dir%" --split %split% --num_vis %num_vis% --output_dir "%output_dir%" %enable_3d_rendering% %viz_config% %render_show_slice%
     ) else (
-        python inference_test.py --checkpoint "%checkpoint%" --model-config "%model_config%" --data_dir "%data_dir%" --split %split% --num_vis %num_vis% --output_dir "%output_dir%"
+        python inference_test.py --checkpoint "%checkpoint%" --model-config "%model_config%" --data_dir "%data_dir%" --split %split% --num_vis %num_vis% --output_dir "%output_dir%" %enable_3d_rendering% %viz_config% %render_show_slice%
     )
 )
 
@@ -828,7 +989,36 @@ echo ======================================================================
 echo                    Dataset Generation Menu
 echo ======================================================================
 echo.
-echo Step 1/2: Select Dataset Configuration
+echo  1. Generate Synthetic Dataset
+echo      - Particle-based simulation
+echo      - Fully configurable deformations
+echo.
+echo  2. Generate Dataset from Experimental TIF Images
+echo      - Extract volumes from real TIF files
+echo      - Apply deformations with known ground truth
+echo.
+echo  0. Back to main menu
+echo.
+echo ======================================================================
+set /p dataset_type="Enter your choice (0-2): "
+
+if "%dataset_type%"=="0" goto MAIN_MENU
+if "%dataset_type%"=="1" goto DATASET_MENU_SYNTHETIC
+if "%dataset_type%"=="2" goto DATASET_MENU_EXPERIMENTAL
+echo Invalid choice! Press any key to try again...
+pause >nul
+goto DATASET_MENU
+
+REM ======================================================================
+REM SYNTHETIC DATASET GENERATION
+REM ======================================================================
+:DATASET_MENU_SYNTHETIC
+cls
+echo ======================================================================
+echo                Synthetic Dataset Generation - Step 1/2
+echo ======================================================================
+echo.
+echo Select Dataset Configuration
 echo.
 echo Available configurations in configs/data_generation/:
 echo.
@@ -842,14 +1032,14 @@ for %%F in (configs\data_generation\*.yaml) do (
 )
 
 echo.
-echo  0. Back to main menu
+echo  0. Back to dataset menu
 echo.
 echo ======================================================================
 set /p cfg_choice="Select configuration (0-%cfg_idx%): "
 
-if "%cfg_choice%"=="0" goto MAIN_MENU
-if %cfg_choice% LEQ 0 goto DATASET_MENU_INVALID
-if %cfg_choice% GTR %cfg_idx% goto DATASET_MENU_INVALID
+if "%cfg_choice%"=="0" goto DATASET_MENU
+if %cfg_choice% LEQ 0 goto DATASET_MENU_SYNTHETIC_INVALID
+if %cfg_choice% GTR %cfg_idx% goto DATASET_MENU_SYNTHETIC_INVALID
 
 REM Get selected config file
 set selected_cfg=!cfg_file_%cfg_choice%!
@@ -858,15 +1048,136 @@ echo Selected: %selected_cfg%
 echo.
 goto DATASET_MODE_SELECT
 
-:DATASET_MENU_INVALID
+:DATASET_MENU_SYNTHETIC_INVALID
 echo Invalid choice! Press any key to try again...
 pause >nul
-goto DATASET_MENU
+goto DATASET_MENU_SYNTHETIC
+
+REM ======================================================================
+REM EXPERIMENTAL DATASET GENERATION (FROM TIF)
+REM ======================================================================
+:DATASET_MENU_EXPERIMENTAL
+cls
+echo ======================================================================
+echo          Experimental Dataset Generation - From TIF Images
+echo ======================================================================
+echo.
+echo This tool generates datasets from real experimental TIF images:
+echo   - Extracts 128^3 volumes from large TIF files
+echo   - Applies controlled deformations
+echo   - Creates ground truth flow fields
+echo.
+echo Prerequisites:
+echo   1. Place raw TIF files in data_tif/experiment_name/
+echo   2. Create config in configs/data_generation_from_experiments/
+echo.
+echo ======================================================================
+echo.
+echo Available configurations in configs/data_generation_from_experiments/:
+echo.
+
+REM Collect all .yaml files in configs/data_generation_from_experiments/
+set exp_cfg_idx=0
+for %%F in (configs\data_generation_from_experiments\*.yaml) do (
+    set /a exp_cfg_idx+=1
+    set "exp_cfg_file_!exp_cfg_idx!=%%F"
+    echo  !exp_cfg_idx!. %%~nxF
+)
+
+if %exp_cfg_idx%==0 (
+    echo  ^(No configurations found^)
+    echo.
+    echo Create a config file first! See example:
+    echo   configs/data_generation_from_experiments/JinYang_confocal_beads_indentation.yaml
+    echo.
+    pause
+    goto DATASET_MENU
+)
+
+echo.
+echo  0. Back to dataset menu
+echo.
+echo ======================================================================
+set /p exp_cfg_choice="Select configuration (0-%exp_cfg_idx%): "
+
+if "%exp_cfg_choice%"=="0" goto DATASET_MENU
+if %exp_cfg_choice% LEQ 0 goto DATASET_MENU_EXPERIMENTAL_INVALID
+if %exp_cfg_choice% GTR %exp_cfg_idx% goto DATASET_MENU_EXPERIMENTAL_INVALID
+
+REM Get selected config file
+set selected_exp_cfg=!exp_cfg_file_%exp_cfg_choice%!
+
+REM Check if raw data directory exists (read from config)
+echo.
+echo Checking configuration...
+python -c "import yaml; cfg=yaml.safe_load(open('%selected_exp_cfg%')); print(cfg['input']['raw_data_dir'])" > temp_raw_dir.txt
+set /p raw_dir=<temp_raw_dir.txt
+del temp_raw_dir.txt
+
+if not exist "%raw_dir%" (
+    echo.
+    echo ======================================================================
+    echo ERROR: Raw data directory not found: %raw_dir%
+    echo.
+    echo Please check:
+    echo   1. Config file: %selected_exp_cfg%
+    echo   2. Raw data directory: %raw_dir%
+    echo.
+    echo Make sure your TIF files are in the correct location.
+    echo ======================================================================
+    pause
+    goto DATASET_MENU_EXPERIMENTAL
+)
+
+REM Show summary
+cls
+echo ======================================================================
+echo          Experimental Dataset Generation - Confirmation
+echo ======================================================================
+echo.
+echo Configuration:  %selected_exp_cfg%
+echo Raw data:       %raw_dir%
+echo.
+python -c "import yaml; cfg=yaml.safe_load(open('%selected_exp_cfg%')); print(f\"Dataset name:   {cfg['dataset_name']}\"); splits=cfg['splits']; total=splits['train']['num_samples']+splits['val']['num_samples']+splits['test']['num_samples']; print(f\"Total samples:  {total} (train={splits['train']['num_samples']}, val={splits['val']['num_samples']}, test={splits['test']['num_samples']})\"); print(f\"Output:         data/{cfg['dataset_name']}/\")"
+echo.
+echo This process will:
+echo   1. Load TIF files from %raw_dir%
+echo   2. Extract 128^3 volumes
+echo   3. Apply deformations and create ground truth
+echo   4. Save to data/^(dataset_name^)/
+echo.
+echo Estimated time: 10-30 minutes (depends on file size and config)
+echo.
+echo ======================================================================
+set /p confirm="Start generation? (y/n): "
+
+if /i not "%confirm%"=="y" goto DATASET_MENU_EXPERIMENTAL
+
+REM Start generation
+cls
+echo ======================================================================
+echo Generating Experimental Dataset
+echo ======================================================================
+echo.
+call conda activate raft-dvc-2
+echo.
+python scripts/data_generation_from_experiments/generate_from_tif.py --config "%selected_exp_cfg%"
+echo.
+echo ======================================================================
+echo Generation complete!
+echo ======================================================================
+pause
+goto MAIN_MENU
+
+:DATASET_MENU_EXPERIMENTAL_INVALID
+echo Invalid choice! Press any key to try again...
+pause >nul
+goto DATASET_MENU_EXPERIMENTAL
 
 :DATASET_MODE_SELECT
 cls
 echo ======================================================================
-echo                    Dataset Generation - Step 2/2
+echo            Synthetic Dataset Generation - Step 2/2
 echo ======================================================================
 echo.
 echo Selected config: %selected_cfg%
@@ -887,7 +1198,7 @@ echo.
 echo ======================================================================
 set /p mode_choice="Enter your choice (0-2): "
 
-if "%mode_choice%"=="0" goto DATASET_MENU
+if "%mode_choice%"=="0" goto DATASET_MENU_SYNTHETIC
 if "%mode_choice%"=="1" goto GEN_FULL
 if "%mode_choice%"=="2" goto GEN_PREVIEW
 echo Invalid choice! Press any key to try again...
@@ -908,7 +1219,7 @@ echo.
 echo Press Ctrl+C to cancel, or any key to start...
 pause
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Starting full dataset generation...
 echo.
@@ -933,7 +1244,7 @@ echo This allows you to check the configuration before full generation.
 echo.
 pause
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Starting preview generation...
 echo.
@@ -981,7 +1292,7 @@ pause >nul
 goto TESTSET_MENU
 
 :TESTSET_SINGLE
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 set /p test_idx="Enter test sample index (0-99, default=50): "
 if "%test_idx%"=="" set test_idx=50
@@ -997,7 +1308,7 @@ pause
 goto TESTSET_MENU
 
 :TESTSET_BATCH
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Evaluating entire test set (100 samples)...
 echo This will compute metrics for all test samples (visualize first 3)
@@ -1022,7 +1333,7 @@ echo.
 set /p confirm="Continue? (y/n): "
 if /i not "%confirm%"=="y" goto TESTSET_MENU
 
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Generating visualizations for all test samples...
 echo This may take 5-10 minutes...
@@ -1061,7 +1372,7 @@ pause >nul
 goto LEHU_MENU
 
 :LEHU_SINGLE
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 set /p lehu_sample="Enter sample index (0-4): "
 if "%lehu_sample%"=="" set lehu_sample=0
@@ -1077,7 +1388,7 @@ pause
 goto LEHU_MENU
 
 :LEHU_ALL
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Testing all Lehu samples...
 echo.
@@ -1090,7 +1401,7 @@ pause
 goto LEHU_MENU
 
 :LEHU_INSPECT
-call conda activate raft-dvc
+call conda activate raft-dvc-2
 echo.
 echo Inspecting Lehu dataset structure...
 echo.

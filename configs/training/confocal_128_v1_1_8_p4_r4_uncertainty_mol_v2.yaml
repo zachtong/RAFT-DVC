@@ -1,0 +1,75 @@
+# Training Configuration for RAFT-DVC
+# Mixture-of-Laplace (MoL) Uncertainty Estimation Experiment
+#
+# Based on: confocal_128_v1_1_8_p4_r4_uncertainty.yaml (NLL baseline)
+# Strategy: Mixture-of-Laplace loss (SEA-RAFT, ECCV 2024)
+#   - Separates "ordinary" pixels (L1 via fixed b1) from "ambiguous" pixels (learned b2)
+#   - Prevents uniformly small uncertainty estimates
+# Changes vs NLL baseline:
+#   - MoLUncertaintyHead (4 channels) instead of UncertaintyHead (3 channels)
+#   - MoLSequenceLoss instead of NLLSequenceLoss
+
+# Data settings (same as baseline)
+data:
+  train_dir: "data/synthetic_confocal_128_v1/train"
+  val_dir: "data/synthetic_confocal_128_v1/val"
+  test_dir: "data/synthetic_confocal_128_v1/test"
+
+  augment: true
+  patch_size: null
+  num_workers: 4
+
+# Training settings (same as baseline)
+training:
+  epochs: 300
+  batch_size: 4 # v1: trained on 4070Ti
+
+  optimizer: "AdamW"
+  lr: 0.0001
+  weight_decay: 0.00005
+
+  scheduler: "CyclicLR"
+  base_lr: 0.00005
+  max_lr: 0.0001
+  step_size_up: 500
+  step_size_down: 1500
+  mode: "triangular2"
+
+  clip_grad_norm: 1.0
+  use_amp: true
+  gamma: 0.8
+
+  val_freq: 5
+  save_freq: 10
+
+# Evaluation settings (same as baseline)
+evaluation:
+  metrics:
+    - "EPE"
+    - "1px"
+    - "3px"
+    - "5px"
+  iters: 12
+
+# Output settings
+output:
+  output_dir: "outputs/training/confocal_128_v1_1_8_p4_r4_uncertainty_mol_v2"
+  experiment_name: "raft_dvc_confocal_v1_1_8_p4_r4_uncertainty_mol_v2"
+  log_freq: 10
+  tensorboard: true
+  save_visualizations: true
+
+# Checkpoint - train from scratch
+checkpoint:
+  resume: null
+  save_best: true
+
+device: "cuda"
+seed: 42
+
+# === Training Strategies ===
+strategies:
+  uncertainty:
+    enabled: true
+    loss_type: "mol" # "nll" (default, current) or "mol" (Mixture of Laplace)
+    mol_b1: 1.0 # fixed scale for ordinary component (SEA-RAFT: beta1=0 -> b1=exp(0)=1.0)
