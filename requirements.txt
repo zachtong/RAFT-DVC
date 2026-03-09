@@ -1,11 +1,15 @@
 # RAFT-DVC Dependencies
-# This project was developed and tested on NVIDIA RTX 5090 (24GB VRAM)
 # Recommended: CUDA-capable GPU with at least 16GB VRAM for training 128³ volumes
+#
+# PyTorch: Install BEFORE running pip install -r requirements.txt
+# The correct version depends on your GPU:
+#   GH200 (TACC Vista):  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   RTX 5090 (sm_120):   pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+#   RTX 3090/4090:       pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# Deep Learning Framework
-# RTX 5090 (sm_120) requires PyTorch 2.4.0+ for proper CUDA support
-torch==2.4.1
-torchvision==0.19.1
+# Deep Learning Framework (install manually first, see above)
+torch>=2.0.0
+torchvision>=0.15.0
 
 # Scientific Computing
 numpy>=1.21.0,<2.0.0
@@ -35,9 +39,6 @@ tensorboard>=2.8.0
 # Note: The visualization module works without PyVista (uses matplotlib as fallback),
 #       but PyVista provides significantly better rendering quality for 3D volumes.
 
-# Installation Notes for RTX 5090:
-# 1. Install NumPy first: pip install numpy==1.26.4
-# 2. RTX 5090 requires PyTorch nightly with CUDA 12.8:
-#    pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
-# 3. For other GPUs (RTX 3090/4090 etc.), use stable PyTorch with CUDA 12.1:
-#    pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121
+# Installation:
+# 1. Install PyTorch first (see GPU-specific commands at top of this file)
+# 2. Then: pip install -r requirements.txt
