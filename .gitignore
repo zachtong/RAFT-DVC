@@ -118,6 +118,9 @@ tmp/
 # Third-party reference code
 VolRAFT/
 
+# TACC scratch symlink
+scratch
+
 # Temporary files and debugging
 temp_*/
 *_preview/

@@ -1,0 +1,18 @@
+# Normalize line endings to LF on commit, regardless of OS
+* text=auto eol=lf
+
+# Binary files — do not modify
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.npy binary
+*.npz binary
+*.tif binary
+*.tiff binary
+*.h5 binary
+*.hdf5 binary
+*.pth binary
+*.pt binary
+*.ckpt binary
