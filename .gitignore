@@ -103,6 +103,7 @@ test_output/
 # Checkpoints and experimental data (upload manually when ready)
 checkpoints/
 data_tif/
+datasets/
 
 # Notebooks (keep .ipynb files but ignore checkpoints)
 # *.ipynb  # Uncomment if you don't want to track notebooks
@@ -120,6 +121,18 @@ VolRAFT/
 
 # TACC scratch symlink
 scratch
+
+# Archive: keep code/config/doc text files tracked, but ignore any large
+# binaries (PDFs, checkpoints, volume files) that might land inside.
+archive/**/*.pdf
+archive/**/*.pth
+archive/**/*.ckpt
+archive/**/*.npy
+archive/**/*.npz
+archive/**/*.tif
+archive/**/*.tiff
+archive/**/*.h5
+archive/**/*.hdf5
 
 # Temporary files and debugging
 temp_*/

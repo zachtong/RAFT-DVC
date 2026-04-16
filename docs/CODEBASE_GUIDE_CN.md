@@ -3,6 +3,21 @@
 > 本文档详细介绍当前实现的RAFT-DVC代码库结构、模型架构、训练和推理流程
 > 基于 volRAFT (CVPR 2024) 的3D光流网络实现
 
+> ## ⚠️ 2026-04-16 Update — 部分路径已过时
+>
+> 本文档的 **核心库设计**（`src/core/` 内的 encoder / correlation / update
+> block 等）仍然是权威参考。但本文档中提到的命令行入口和推理模块位置已发生变化：
+>
+> | 旧引用 | 当前位置 |
+> |--------|----------|
+> | `src/inference/*` | `src/legacy_inference/*`（Phase-1/2 已弃用） |
+> | `scripts/train.py` / `scripts/train_confocal.py` | `archive/scripts_old/` |
+> | `scripts/test_confocal.py` / `scripts/infer.py` | `archive/scripts_old/` |
+> | `configs/training/confocal_*.yaml` | `archive/configs_training_old/` |
+>
+> Phase-1 请使用 `scripts/phase1/train_phase1.py` 和
+> `scripts/phase1/evaluate_phase1.py`。
+
 ---
 
 ## 📁 目录结构

@@ -1,212 +1,94 @@
 # RAFT-DVC: Deep Learning for Digital Volume Correlation
 
-A comprehensive PyTorch implementation of 3D Digital Volume Correlation using RAFT optical flow architecture, with advanced synthetic data generation and training pipelines.
+A PyTorch implementation of 3D Digital Volume Correlation (DVC) using the RAFT
+optical-flow architecture, with synthetic confocal-microscopy data generation
+and a TACC-ready training pipeline.
 
 **Based on**: [VolRAFT (CVPR 2024)](https://openaccess.thecvf.com/content/CVPR2024W/CV4MS/html/Wong_VolRAFT_Volumetric_Optical_Flow_Network_for_Digital_Volume_Correlation_of_CVPRW_2024_paper.html)
 
-**Authors**: Zach Tong, Prof. Jin Yang, Lehu Bu
+**Authors**: Zach Tong, Prof. Jin Yang (UT Austin), Lehu Bu
 
-## ✨ Features
+---
 
-- **3D RAFT Architecture**: Volumetric optical flow estimation with iterative refinement
-- **Synthetic Data Generation**: Comprehensive confocal microscopy simulation system
-  - Multiple deformation types (affine, B-spline, localized, combined)
-  - Realistic particle rendering with configurable properties
-  - Flexible noise models and imaging simulation
-- **Flexible Training Pipeline**:
-  - Multiple model configurations (varying correlation radius, pyramid levels)
-  - CyclicLR scheduler matching VolRAFT
-  - Automatic Mixed Precision (AMP) support
-  - TensorBoard logging with visualization
-- **Robust Inference System**:
-  - Sliding window for large volumes
-  - Batch processing and single-sample testing
-  - Model registry for easy checkpoint management
-- **Unified Interface**: Windows batch script (`run.bat`) for all operations
+## 🧭 Project Status (2026-04-16)
 
-## 🖥️ Hardware Requirements
+This repository is in the middle of a reorganization. The live code targets
+the **Phase-1 experimental campaign** for the RAFTcorr3D paper (40 training
+runs across 9 data configurations × 4 encoder variants).
 
-**Developed and tested on**: NVIDIA RTX 5090 (24GB VRAM)
-
-**Minimum requirements**:
-- CUDA-capable GPU with at least 16GB VRAM for training 128³ volumes
-- 32GB system RAM recommended
-- For 32³ volumes: 8GB VRAM sufficient
-
-## 📦 Installation
-
-### Prerequisites
-
-- Python 3.9+
-- CUDA 12.1+ (for RTX 5090 / Ada Lovelace GPUs)
-- Conda (recommended) or pip
-
-### Setup
-
-```bash
-# Create conda environment
-conda create -n raft-dvc python=3.10
-conda activate raft-dvc
-
-# Install PyTorch with CUDA 12.1 (for RTX 5090)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# Install dependencies
-pip install -r requirements.txt
-```
+Pre-2026-04-16 experimental artifacts have been moved to [`archive/`](archive/)
+as a read-only historical reference. See [`archive/README.md`](archive/README.md).
 
 ## 📁 Project Structure
 
 ```
 RAFT-DVC/
-├── src/                          # Source code
-│   ├── core/                     # Core RAFT-DVC network
-│   │   ├── raft_dvc.py           # Main model
-│   │   ├── extractor.py          # Feature extraction
-│   │   ├── corr.py               # Correlation volume
-│   │   └── update.py             # GRU update operator
-│   ├── training/                 # Training pipeline
-│   │   ├── trainer.py            # Training loop
-│   │   ├── dataset.py            # Data loading
-│   │   └── loss.py               # Loss functions
-│   ├── inference/                # Inference engine
-│   │   ├── pipeline.py           # Inference pipeline
-│   │   ├── model_registry.py    # Model management
-│   │   └── tiling.py             # Sliding window
-│   └── utils/                    # Utilities
-│       ├── io.py                 # File I/O
-│       └── memory.py             # Memory management
+├── src/                          Core library (reusable)
+│   ├── core/                     RAFT-DVC network (encoder, correlation, update)
+│   ├── data/                     Dataset classes
+│   ├── training/                 Trainer, loss, augmentation strategies
+│   ├── utils/                    IO, memory, config loaders
+│   ├── visualization/            TensorBoard hooks, PyVista/matplotlib renders
+│   └── legacy_inference/         DEPRECATED for Phase-1/2; retained for Phase-3
 │
-├── scripts/                      # Executable scripts
-│   ├── data_generation/          # Synthetic data generation
-│   │   ├── generate_confocal_dataset.py
-│   │   └── modules/              # Generation modules
-│   │       ├── beads.py          # Particle rendering
-│   │       ├── deformation.py    # Deformation fields
-│   │       └── imaging.py        # Imaging simulation
-│   ├── train_confocal.py         # Training script
-│   └── test_confocal.py          # Testing script
+├── configs/
+│   ├── models/                   Encoder variants (1/1, 1/2, 1/4, 1/8)
+│   ├── data_generation/          Synthetic-data YAMLs
+│   ├── phase1/                   Phase-1 training configs  (to be added)
+│   └── inference/                Visualization configs
 │
-├── configs/                      # Configuration files
-│   ├── training/                 # Training configs
-│   │   └── confocal_*.yaml       # Various configurations
-│   ├── models/                   # Model architecture configs
-│   │   └── raft_dvc_*.yaml       # Model variants
-│   ├── data_generation/          # Data generation configs
-│   │   └── confocal_*.yaml       # Dataset configurations
-│   └── inference/                # Inference configs
+├── scripts/
+│   ├── data_generation/          Synthetic-data modules
+│   ├── generate_phase1_dataset.py
+│   ├── preview_noise_model.py
+│   ├── preview_parameter_grid.py
+│   ├── slurm_train.sh            TACC Vista SLURM template
+│   ├── tacc_setup.sh             TACC first-time setup cheatsheet
+│   └── phase1/                   Phase-1 training/evaluation scripts  (to be added)
 │
-├── tools/                        # Utility tools
-│   ├── visualize_confocal.py     # Visualization tools
-│   └── test_cuda.py              # CUDA setup verification
-│
-├── docs/                         # Documentation
-│   └── (See documentation below)
-│
-├── QUICK_START_CN.md             # Quick start (Chinese)
-├── run.bat                       # Unified entry point (Windows)
-├── inference_test.py             # Inference testing script
-└── preview_v3_dataset.py         # Dataset preview tool
+├── datasets/phase1/              Local Phase-1 dataset (not tracked by git)
+├── reports/                      Auto-generated PDF test reports
+├── docs/                         Architecture & codebase guide (Chinese + English)
+├── archive/                      Pre-Phase-1 experimental snapshot (read-only)
+└── CLAUDE.md                     Project rules for Claude Code
 ```
 
-**Note**: `data/`, `outputs/`, and model checkpoints are excluded from the repository due to size.
+## 📦 Setup
 
-## 🚀 Quick Start
-
-### Option 1: Unified Interface (Windows - Recommended)
+### Local (Windows / Linux)
 
 ```bash
-run.bat
+conda create -n raft-dvc python=3.10
+conda activate raft-dvc
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt
 ```
 
-This provides an interactive menu for:
-1. **Training**: Train models with different configurations
-2. **Inference**: Test on validation/test sets (single or batch)
-3. **Dataset Generation**: Create synthetic confocal datasets
-4. **Visualization**: Preview datasets and results
+### TACC Vista (GH200)
 
-### Option 2: Manual Command Line
+See [`scripts/tacc_setup.sh`](scripts/tacc_setup.sh) — a copy-paste cheatsheet
+for first-time setup of `$WORK` / `$SCRATCH` directories, conda env, and shell
+aliases.
 
-#### 1. Generate Synthetic Dataset
+## 🚀 Phase-1 Workflow (in progress)
 
-```bash
-python scripts/data_generation/generate_confocal_dataset.py \
-    --config configs/data_generation/confocal_particles_128.yaml
-```
-
-#### 2. Train Model
-
-```bash
-python scripts/train_confocal.py \
-    --config configs/training/confocal_128_1_8_p4_r4.yaml \
-    --model-config configs/models/raft_dvc_1_8_p4_r4.yaml
-```
-
-#### 3. Inference
-
-```bash
-# Single sample
-python inference_test.py \
-    --checkpoint outputs/training/confocal_128_v1_1_8_p4_r4/checkpoint_best.pth \
-    --split val --sample 50
-
-# Batch processing (all samples)
-python inference_test.py \
-    --checkpoint outputs/training/confocal_128_v1_1_8_p4_r4/checkpoint_best.pth \
-    --split test --num-vis 10
-```
-
-## 📊 Dataset Configurations
-
-Multiple dataset variants are provided:
-
-- **confocal_128**: Original configuration (larger particles, 400-1500/volume)
-- **confocal_128_v2**: Smaller particles (0.8-3.0 voxels), wider density (200-2000)
-- **confocal_128_v3**: Same as v2 but uses v1 dataset for comparison
-- **confocal_32**: Smaller volumes for fast prototyping
-
-See [configs/data_generation/](configs/data_generation/) for details.
-
-## 🎯 Model Configurations
-
-Multiple model architectures available:
-
-- **1_8_p4_r4**: Hidden dim=128, 4 pyramid levels, correlation radius=4 (recommended)
-- **1_4_p3_r4**: Hidden dim=128, 3 pyramid levels, correlation radius=4 (faster)
-- **1_2_p2_r4**: Hidden dim=128, 2 pyramid levels, correlation radius=4 (lightweight)
-
-See [configs/models/](configs/models/) for architecture details.
+1. **Generate dataset locally** — `python scripts/generate_phase1_dataset.py`
+   produces 1000/100/100 train/val/test NPZ samples per configuration.
+2. **Upload dataset to TACC `$SCRATCH`** — see `scripts/upload_dataset_to_tacc.sh`
+   (to be added).
+3. **Train on Vista GH200** — `sbatch scripts/slurm_train.sh` (after editing
+   the script to point at `train_phase1.py`).
+4. **Evaluate** — `python scripts/phase1/evaluate_phase1.py --checkpoint ...`.
 
 ## 📚 Documentation
 
-- **[docs/TRAINING_GUIDE.md](docs/TRAINING_GUIDE.md)**: Detailed training instructions
-- **[docs/DATA_GENERATION.md](docs/DATA_GENERATION.md)**: Synthetic data generation guide
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: System architecture overview
-- **[QUICK_START_CN.md](QUICK_START_CN.md)**: 中文快速开始指南
-
-## 🔧 Development
-
-### Testing CUDA Setup
-
-```bash
-python tools/test_cuda.py
-```
-
-### Visualizing Data
-
-```bash
-python tools/visualize_confocal.py --data-dir data/synthetic_confocal_128/train
-```
-
-### Preview Dataset Configuration
-
-```bash
-python preview_v3_dataset.py --config configs/data_generation/confocal_particles_32_v3.yaml
-```
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — core library design (authoritative)
+- [`docs/CODEBASE_GUIDE_CN.md`](docs/CODEBASE_GUIDE_CN.md) — 中文代码库指南
+- [`docs/plans/`](docs/plans/) — current experiment plans
+- [`CLAUDE.md`](CLAUDE.md) — project conventions (language policy, testing policy)
+- [`archive/`](archive/) — pre-Phase-1 experimental docs and configs
 
 ## 📖 Citation
-
-If you use this code in your research, please cite the original VolRAFT paper:
 
 ```bibtex
 @inproceedings{wong2024volraft,
@@ -218,14 +100,6 @@ If you use this code in your research, please cite the original VolRAFT paper:
 }
 ```
 
-## 🙏 Acknowledgments
-
-This implementation builds upon:
-- [VolRAFT](https://github.com/hereon-mbs/VolRAFT) - Original implementation
-- [RAFT](https://github.com/princeton-vl/RAFT) - 2D optical flow foundation
-
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-**Note**: Please replace `[Your Name]` in the LICENSE file with your actual name before publishing.
+MIT — see [LICENSE](LICENSE).

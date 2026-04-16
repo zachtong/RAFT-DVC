@@ -1,5 +1,22 @@
 # RAFT-DVC Architecture & Project Plan
 
+> ## ⚠️ 2026-04-16 Update — Partial Obsolescence Notice
+>
+> This document was written before the Phase-1 experimental campaign. It is
+> still the authoritative reference for the **core RAFT-DVC library design**
+> (encoder, context, correlation, update block — all in `src/core/`), but
+> paths and entry-point scripts below have changed:
+>
+> | Old reference (in this doc) | Current location |
+> |-----------------------------|------------------|
+> | `src/inference/*` | `src/legacy_inference/*` (deprecated for Phase-1/2) |
+> | `scripts/train.py` / `scripts/train_confocal.py` | `archive/scripts_old/` |
+> | `scripts/test_confocal.py` / `scripts/infer.py` | `archive/scripts_old/` |
+> | `configs/training/confocal_*.yaml` | `archive/configs_training_old/` |
+>
+> For the Phase-1 pipeline use `scripts/phase1/train_phase1.py` and
+> `scripts/phase1/evaluate_phase1.py`.
+
 ## Overview
 
 RAFT-DVC is a modular, extensible deep learning framework for 3D Digital Volume
@@ -978,8 +995,13 @@ python scripts/infer.py run \
 
 ### Python API
 
+> **Note (2026-04-16):** The inference module was renamed to
+> `src.legacy_inference` and is now retained only for Phase-3 real-data
+> inference. For Phase-1/2 evaluation on synthetic val/test splits, use
+> `scripts/phase1/evaluate_phase1.py` instead.
+
 ```python
-from src.inference import (
+from src.legacy_inference import (
     VolumeAnalyzer, Preprocessor, Postprocessor,
     InferencePipeline, ModelRegistry,
 )
