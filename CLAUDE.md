@@ -54,9 +54,12 @@ RAFT-DVC/
 │   ├── preview_*.py           Noise / parameter preview tools
 │   ├── slurm_train.sh         TACC Vista SLURM template
 │   ├── tacc_setup.sh          TACC first-time setup cheatsheet
-│   └── phase1/                Phase-1 entry points (to be added)
-├── datasets/phase1/           Local Phase-1 dataset (git-ignored)
-├── reports/                   PDF test reports
+│   ├── upload_dataset_to_tacc.sh  rsync local data_phase1/ to $SCRATCH
+│   └── phase1/                train_phase1.py, evaluate_phase1.py
+├── data_phase1/               Local Phase-1 synthetic dataset (~60 GB, git-ignored)
+│                              Layout: data_phase1/<config>/{train,val,test}/sample_*.npz
+│                              Future phases: data_phase2/, data_phase3/
+├── reports/                   PDF test reports (git-ignored, local only)
 ├── docs/                      Architecture & codebase guides
 ├── archive/                   Pre-Phase-1 experimental snapshot (read-only)
 │   ├── configs_training_old/
@@ -69,12 +72,17 @@ RAFT-DVC/
 ## Storage Policy — TACC Vista
 
 - `$WORK` (1 TB, persistent): code repo, conda env, curated `checkpoint_best.pth`
-- `$SCRATCH` (tens of TB, 10-day purge): **all datasets** (Phase-1 ~60 GB,
+- `$SCRATCH` (tens of TB, 10-day purge): **all synthetic data** (Phase-1 ~60 GB,
   Phase-2/3 multi-TB 128³/256³), training run logs, TensorBoard events
 - `$HOME` (~10 GB): `.bashrc`, SSH keys only
 
-Datasets live on `$SCRATCH` because `$WORK` cannot hold multi-TB data. Use a
-touch-based keepalive in the SLURM script to refresh atime and avoid purge.
+Datasets live on `$SCRATCH` because `$WORK` cannot hold multi-TB data. Env
+vars pointing at the live dataset:
+- `DATA_PHASE1_ROOT=$SCRATCH/raft-dvc/data_phase1` (SLURM script exports this)
+- (future) `DATA_PHASE2_ROOT`, `DATA_PHASE3_ROOT`
+
+Use a touch-based keepalive in the SLURM script to refresh atime and avoid
+the 10-day purge.
 
 ## Archive Policy
 

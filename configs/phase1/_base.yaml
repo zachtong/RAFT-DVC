@@ -1,0 +1,103 @@
+# =============================================================================
+# Phase-1 base training config
+# =============================================================================
+# ONE base config for all Phase-1 runs. Per-run variations are injected
+# by `scripts/phase1/train_phase1.py` via CLI flags:
+#     --model-config CFG.yaml      (1/1 | 1/2 | 1/4 | 1/8 encoder)
+#     --data-config <NAME>         (e.g. r4_medium_size32  -- subdir of data root)
+#     --experiment-name <TAG>
+#     --data-root   <DIR>          (default: $DATA_PHASE1_ROOT or ./data_phase1)
+#     --output-root <DIR>          (default: $CHECKPOINTS_ROOT or ./checkpoints)
+#
+# Design choices (revised 2026-05-16):
+#   - OneCycleLR (single warmup + cosine anneal) -- replaces CyclicLR for
+#     cleaner long-convergence curves.
+#   - AMP on by default.
+#   - patch_size: null  (post-2026-05-15 datasets are pre-sized per encoder;
+#     no runtime cropping needed.)
+#
+# See docs/plans/2026-04-15-experiment-plan.md for the overall campaign.
+# =============================================================================
+
+# ---- Data ---------------------------------------------------------------
+data:
+  # `root_dir` is built at runtime by train_phase1.py as
+  #     <data_phase1_root>/<data_config>/<split>
+  # so nothing is hardcoded here.
+  batch_size: 8           # safe baseline for 1/2 encoder + size32 on 5090 32GB
+                           # (verified via 2026-05-16 smoke test).  Larger batches
+                           # OOM at peak backward activations through 12 GRU iters.
+                           # 1/1 encoder + size16 can go higher (~32-64).
+                           # Override with --batch-size on the CLI per case.
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  augment_train: true
+  augment_val: false
+  # New fm=16 design (2026-05-16): each encoder reads its natively sized data
+  #     1/1 + size16 / 1/2 + size32 / 1/4 + size64 / 1/8 + size128
+  # so no runtime cropping is required.  Override only if you intentionally
+  # want a random crop.
+  patch_size: null
+  include_metadata: false
+
+# ---- Training ------------------------------------------------------------
+training:
+  epochs: 100
+  iters: 12               # RAFT GRU iterations per forward pass
+
+  # Optimizer (AdamW).  LR follows sqrt scaling rule:
+  #   batch=8  -> max_lr=2.0e-4   (current default; CyclicLR baseline-compatible)
+  #   batch=16 -> max_lr=2.8e-4
+  #   batch=32 -> max_lr=4.0e-4
+  # Adjust `lr` and `max_lr` together when you change batch size.
+  lr: 2.0e-4              # peak LR; OneCycleLR rescales from div_factor
+  weight_decay: 5.0e-5
+
+  # ---- LR scheduler -----------------------------------------------------
+  # `scheduler_type`: one of {'onecycle', 'cosine', 'cyclic'}.
+  #   onecycle : single warmup (`pct_start` fraction) + cosine annealing
+  #              to ~zero.  Best for clean convergence-vs-epoch studies.
+  #   cosine   : monotonic cosine from `lr` to `min_lr` over `epochs`.
+  #   cyclic   : legacy CyclicLR(triangular2); use only for backward
+  #              compatibility with pre-2026-05-16 runs.
+  scheduler_type: onecycle
+  # OneCycleLR-specific
+  max_lr: 2.0e-4          # = lr above; OneCycleLR rises to this peak
+  pct_start: 0.05         # 5% of total steps for warmup
+  anneal_strategy: cos    # cosine cool-down after the peak
+  div_factor: 25.0        # initial_lr = max_lr / div_factor   (1.6e-5 at 4e-4)
+  final_div_factor: 1.0e+4  # min_lr = initial_lr / final_div_factor (note +sign for YAML float)
+  # CosineAnnealingLR-specific (only used when scheduler_type == 'cosine')
+  min_lr: 1.0e-6
+  # Legacy CyclicLR knobs (only used when scheduler_type == 'cyclic')
+  base_lr: 2.0e-5
+  step_size_up: 500
+  step_size_down: 1500
+
+  # Loss
+  gamma: 0.8              # SequenceLoss temporal discount
+
+  # Gradient clipping
+  grad_clip: 1.0
+
+  # Mixed precision (AMP)
+  mixed_precision: true
+
+  # Intervals
+  log_interval: 10        # every N iterations inside an epoch (text log)
+  val_interval: 5         # every N epochs (validation pass)
+  save_interval: 50       # every N epochs (rotating ckpt_epoch_NNNN.pth)
+  latest_interval: 10     # every N epochs (latest.pth refresh; best_model.pth
+                           # always saved on improvement regardless of this)
+
+# ---- Validation ----------------------------------------------------------
+validation:
+  batch_size: 8           # shared with training unless overridden
+  num_workers: 2
+
+# ---- Bookkeeping ---------------------------------------------------------
+run:
+  # Filled in by training script:
+  #   run.experiment_name, run.data_config, run.model_config, run.seed
+  seed: 42

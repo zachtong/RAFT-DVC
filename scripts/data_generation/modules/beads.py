@@ -3,7 +3,10 @@ Bead/particle generation and rendering for synthetic confocal microscopy.
 """
 
 import numpy as np
-from scipy.spatial.distance import cdist
+
+# Note: ``scipy.ndimage.gaussian_filter`` and ``scipy.spatial.cKDTree`` are
+# imported lazily inside the rendering helpers so that environments missing
+# scipy can still parse this module (the JIT site emits the real error).
 
 
 class BeadGenerator:
@@ -232,6 +235,97 @@ class BeadRenderer:
 
         # Add to volume (accumulate if overlap)
         volume[z0:z1, y0:y1, x0:x1] += gaussian
+
+
+class HardSphereBeadRenderer:
+    """Render beads as hard spheres with anti-aliased edges, then apply PSF blur.
+
+    Physical model (matches fluorescent bead imaging more closely than the pure
+    Gaussian renderer):
+
+      1. Each bead is a solid sphere of uniform intensity inside its radius.
+         A narrow linear taper at the sphere surface provides sub-voxel
+         anti-aliasing so small-radius beads don't look like cubes.
+      2. Bead overlaps are resolved by ``np.maximum`` (saturation) rather than
+         ``+=``. This models the fact that stacking two fluorophores on the
+         same voxel does not produce unbounded brightness.
+      3. After all beads are drawn, a single Gaussian filter is applied to the
+         whole volume to simulate the imaging PSF.
+
+    Compared to :class:`BeadRenderer`, this decouples the *bead radius* from
+    the *PSF width* and eliminates the r**3 fill-ratio blow-up that makes the
+    pure-Gaussian renderer produce saturated volumes at large radii.
+
+    Config keys (all optional):
+        psf_sigma: Gaussian PSF sigma in voxels (default 0.8).
+        edge_softness: half-width of the anti-aliasing taper in voxels
+            (default 0.5). Set to 0 for a strict hard sphere.
+    """
+
+    def __init__(self, volume_shape, config=None):
+        self.volume_shape = tuple(volume_shape)
+        cfg = config or {}
+        self.psf_sigma = float(cfg.get('psf_sigma', 0.8))
+        self.edge_softness = float(cfg.get('edge_softness', 0.5))
+
+    def render(self, beads):
+        """Render all beads, then apply a single global PSF blur."""
+        volume = np.zeros(self.volume_shape, dtype=np.float32)
+
+        positions = beads['positions']
+        radii = beads['radii']
+        intensities = beads['intensities']
+
+        for i in range(len(positions)):
+            self._render_single_bead(
+                volume,
+                positions[i],
+                float(radii[i]),
+                float(intensities[i]),
+            )
+
+        if self.psf_sigma > 0:
+            from scipy.ndimage import gaussian_filter
+            volume = gaussian_filter(volume, sigma=self.psf_sigma)
+
+        return volume
+
+    def _render_single_bead(self, volume, position, radius, intensity):
+        taper = self.edge_softness
+        bbox_r = int(np.ceil(radius + taper)) + 1
+
+        z0 = max(0, int(position[0]) - bbox_r)
+        z1 = min(self.volume_shape[0], int(position[0]) + bbox_r + 1)
+        y0 = max(0, int(position[1]) - bbox_r)
+        y1 = min(self.volume_shape[1], int(position[1]) + bbox_r + 1)
+        x0 = max(0, int(position[2]) - bbox_r)
+        x1 = min(self.volume_shape[2], int(position[2]) + bbox_r + 1)
+
+        if z0 >= z1 or y0 >= y1 or x0 >= x1:
+            return
+
+        z_grid, y_grid, x_grid = np.meshgrid(
+            np.arange(z0, z1),
+            np.arange(y0, y1),
+            np.arange(x0, x1),
+            indexing='ij',
+        )
+        dz = z_grid - position[0]
+        dy = y_grid - position[1]
+        dx = x_grid - position[2]
+        dist = np.sqrt(dz * dz + dy * dy + dx * dx)
+
+        if taper > 0:
+            # Linear taper: alpha = 1 at dist = r - taper, 0 at dist = r + taper.
+            alpha = np.clip((radius + taper - dist) / (2.0 * taper), 0.0, 1.0)
+        else:
+            alpha = (dist <= radius).astype(np.float32)
+
+        bead_value = (alpha * intensity).astype(np.float32)
+
+        # Saturation composite: max, not sum.
+        region = volume[z0:z1, y0:y1, x0:x1]
+        np.maximum(region, bead_value, out=region)
 
 
 def compute_bead_statistics(beads):

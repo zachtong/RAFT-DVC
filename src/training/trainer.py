@@ -10,10 +10,17 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CyclicLR
+from torch.optim.lr_scheduler import CyclicLR, OneCycleLR, CosineAnnealingLR
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
 import logging
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    _TB_AVAILABLE = True
+except Exception:  # tensorboard not installed
+    SummaryWriter = None  # type: ignore[assignment]
+    _TB_AVAILABLE = False
 
 from ..core import RAFTDVC
 from .loss import SequenceLoss, CombinedLoss
@@ -98,33 +105,73 @@ class Trainer:
             weight_decay=self.config['weight_decay']
         )
         
-        # Setup scheduler - CyclicLR with triangular2 mode (matches volRAFT)
-        # Get scheduler config with defaults
-        base_lr = self.config.get('base_lr', 2e-5)  # volRAFT default
-        max_lr = self.config.get('max_lr', 2e-4)  # volRAFT default (10x base)
-        step_size_up = self.config.get('step_size_up', 500)  # iterations
-        step_size_down = self.config.get('step_size_down', 1500)  # iterations
+        # Setup scheduler — three supported types selected by `scheduler_type`:
+        #   - cyclic   : CyclicLR(triangular2)   (legacy, volRAFT-inherited)
+        #   - onecycle : OneCycleLR              (single warmup-then-anneal)
+        #   - cosine   : CosineAnnealingLR       (monotonic cooldown)
+        # `step_per` records whether to call scheduler.step() per iter or per epoch.
+        sched_type = self.config.get('scheduler_type', 'cyclic')
+        iters_per_epoch = max(1, len(self.train_loader))
+        total_steps = int(self.config['epochs']) * iters_per_epoch
 
-        self.scheduler = CyclicLR(
-            self.optimizer,
-            base_lr=base_lr,
-            max_lr=max_lr,
-            step_size_up=step_size_up,
-            step_size_down=step_size_down,
-            mode='triangular2',  # Amplitude decreases each cycle
-            cycle_momentum=False
-        )
+        if sched_type == 'onecycle':
+            self.scheduler = OneCycleLR(
+                self.optimizer,
+                max_lr=float(self.config.get('max_lr', 4e-4)),
+                total_steps=total_steps,
+                pct_start=float(self.config.get('pct_start', 0.05)),
+                anneal_strategy=str(self.config.get('anneal_strategy', 'cos')),
+                div_factor=float(self.config.get('div_factor', 25.0)),
+                final_div_factor=float(self.config.get('final_div_factor', 1e4)),
+                cycle_momentum=False,
+            )
+            self._sched_step_per = 'iter'
+        elif sched_type == 'cosine':
+            self.scheduler = CosineAnnealingLR(
+                self.optimizer,
+                T_max=int(self.config['epochs']),
+                eta_min=float(self.config.get('min_lr', 1e-6)),
+            )
+            self._sched_step_per = 'epoch'
+        else:  # cyclic (backward compatible default)
+            base_lr = float(self.config.get('base_lr', 2e-5))
+            max_lr = float(self.config.get('max_lr', 2e-4))
+            step_size_up = int(self.config.get('step_size_up', 500))
+            step_size_down = int(self.config.get('step_size_down', 1500))
+            self.scheduler = CyclicLR(
+                self.optimizer,
+                base_lr=base_lr,
+                max_lr=max_lr,
+                step_size_up=step_size_up,
+                step_size_down=step_size_down,
+                mode='triangular2',
+                cycle_momentum=False,
+            )
+            self._sched_step_per = 'iter'
         
         # Setup loss
         self.criterion = SequenceLoss(gamma=self.config['gamma'])
-        
-        # Mixed precision
-        self.scaler = torch.cuda.amp.GradScaler() if self.config['mixed_precision'] else None
-        
+
+        # Mixed precision (new torch.amp API; falls back if old torch missing GradScaler)
+        if self.config['mixed_precision']:
+            try:
+                self.scaler = torch.amp.GradScaler('cuda')
+            except TypeError:  # very old torch
+                self.scaler = torch.cuda.amp.GradScaler()
+        else:
+            self.scaler = None
+
         # Logging
         self.logger = logging.getLogger('RAFT-DVC')
         self._setup_logging()
-        
+
+        # TensorBoard writer (best-effort -- skip silently if tb missing).
+        self.tb_writer = None
+        if _TB_AVAILABLE:
+            tb_dir = self.output_dir / 'logs'
+            tb_dir.mkdir(parents=True, exist_ok=True)
+            self.tb_writer = SummaryWriter(log_dir=str(tb_dir))
+
         # Training state
         self.epoch = 0
         self.global_step = 0
@@ -163,34 +210,51 @@ class Trainer:
             # Forward pass
             self.optimizer.zero_grad()
             
+            # `step_taken` tracks whether optimizer.step() actually ran this
+            # iteration -- AMP scaler can skip it on inf/NaN gradients, in which
+            # case we must NOT advance the LR scheduler (avoids the
+            # "lr_scheduler.step() before optimizer.step()" warning + drift).
             if self.scaler is not None:
-                with torch.cuda.amp.autocast():
+                # Pre-step LR snapshot so we can detect a real step via scaler.
+                pre_step_scale = self.scaler.get_scale()
+                with torch.amp.autocast('cuda'):
                     flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
                     loss = self.criterion(flow_preds, gt_flow)
-                
+
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), 
+                    self.model.parameters(),
                     self.config['grad_clip']
                 )
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
+                # scaler.update() decreases the scale on bad steps; equal scale
+                # implies optimizer.step() executed normally.
+                step_taken = self.scaler.get_scale() >= pre_step_scale
             else:
                 flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
                 loss = self.criterion(flow_preds, gt_flow)
-                
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), 
+                    self.model.parameters(),
                     self.config['grad_clip']
                 )
                 self.optimizer.step()
+                step_taken = True
 
-            # Step scheduler per batch for CyclicLR (step_size_up/down are in iterations)
-            self.scheduler.step()
+            # Step scheduler per iteration for cyclic / onecycle; cosine steps per epoch.
+            if step_taken and self._sched_step_per == 'iter':
+                self.scheduler.step()
             self.global_step += 1
             total_loss += loss.item()
+
+            # TensorBoard per-iter logging — keep LR only (needed to verify
+            # OneCycleLR / CyclicLR shape).  Per-iter loss is dropped because
+            # the IO cost dwarfs the signal value (250 writes/epoch).
+            if self.tb_writer is not None:
+                self.tb_writer.add_scalar('train/lr', self.scheduler.get_last_lr()[0], self.global_step)
 
             # Logging
             if batch_idx % self.config['log_interval'] == 0:
@@ -229,11 +293,15 @@ class Trainer:
         
         avg_loss = total_loss / len(self.val_loader)
         avg_epe = total_epe / len(self.val_loader)
-        
+
         self.logger.info(
             f"Validation - Loss: {avg_loss:.4f} EPE: {avg_epe:.4f}"
         )
-        
+
+        if self.tb_writer is not None:
+            self.tb_writer.add_scalar('val/loss', avg_loss, self.epoch)
+            self.tb_writer.add_scalar('val/epe', avg_epe, self.epoch)
+
         return avg_loss
     
     def save_checkpoint(self, filename: str = 'checkpoint.pth', is_best: bool = False):
@@ -288,7 +356,11 @@ class Trainer:
             
             # Training
             train_loss = self.train_epoch()
-            
+
+            # Per-epoch scheduler step (cosine; cyclic / onecycle step per-iter inside train_epoch).
+            if self._sched_step_per == 'epoch':
+                self.scheduler.step()
+
             # Validation
             if self.val_loader is not None and epoch % self.config['val_interval'] == 0:
                 val_loss = self.validate()
@@ -298,20 +370,31 @@ class Trainer:
                     self.best_val_loss = val_loss
                     self.save_checkpoint('best_model.pth', is_best=True)
             
-            # Save periodic checkpoint
+            # Save periodic rotating checkpoint
             if epoch % self.config['save_interval'] == 0:
                 self.save_checkpoint(f'checkpoint_epoch_{epoch:04d}.pth')
-            
-            # Always save latest
-            self.save_checkpoint('latest.pth')
+
+            # Refresh latest.pth on a slower cadence -- writing every epoch
+            # measurably slows OneDrive-synced repos and adds little safety
+            # value (best_model.pth still saves on every val improvement).
+            latest_interval = int(self.config.get('latest_interval', 10))
+            if epoch % latest_interval == 0 or (epoch + 1) == self.config['epochs']:
+                self.save_checkpoint('latest.pth')
             
             epoch_time = time.time() - epoch_start
             self.logger.info(
                 f"Epoch {epoch} completed in {epoch_time:.1f}s - "
                 f"Train Loss: {train_loss:.4f}"
             )
-        
+
+            if self.tb_writer is not None:
+                self.tb_writer.add_scalar('train/loss_epoch', train_loss, epoch)
+                self.tb_writer.add_scalar('train/epoch_time_sec', epoch_time, epoch)
+
         total_time = time.time() - start_time
         self.logger.info(f"Training completed in {total_time/3600:.1f} hours")
-        
+
+        if self.tb_writer is not None:
+            self.tb_writer.close()
+
         return self.best_val_loss

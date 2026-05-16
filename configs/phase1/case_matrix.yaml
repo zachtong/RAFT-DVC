@@ -1,0 +1,44 @@
+# =============================================================================
+# Phase-1 case matrix: 20 training runs (size16 + size32) on TACC GH200 + OTF
+# =============================================================================
+# Each entry maps to one SLURM array task.  Index = (array_task_id).
+# Fields:
+#   name   : --experiment-name passed to train_phase1.py
+#   data   : --data-config (determines OTF (radius, density, size))
+#   model  : --model-config (encoder yaml)
+#   batch  : --batch-size
+#
+# Assumptions for current sweep:
+#   - 500 epochs, OTF mode, batch=24, num_workers=32, max_lr=4e-4
+#   - These shared params live in scripts/phase1/slurm_train_otf.sh
+#
+# Future extension to size64 / size128 (1/4 + 1/8 encoders) adds 20 more rows.
+# =============================================================================
+
+cases:
+  # --------------------------------------------------------------------------
+  # 1/1 encoder @ input 16^3  (10 cases)
+  # --------------------------------------------------------------------------
+  - {name: r2sp16_e11_otf, data: r2_sparse_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r2md16_e11_otf, data: r2_medium_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r2dn16_e11_otf, data: r2_dense_size16,  model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r4sp16_e11_otf, data: r4_sparse_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r4md16_e11_otf, data: r4_medium_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r4dn16_e11_otf, data: r4_dense_size16,  model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r6sp16_e11_otf, data: r6_sparse_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r6md16_e11_otf, data: r6_medium_size16, model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: r6dn16_e11_otf, data: r6_dense_size16,  model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  - {name: mix16_e11_otf,  data: mixed_size16,     model: configs/models/raft_dvc_1_1_p2_r4.yaml, batch: 24}
+  # --------------------------------------------------------------------------
+  # 1/2 encoder @ input 32^3  (10 cases)
+  # --------------------------------------------------------------------------
+  - {name: r2sp32_e12_otf, data: r2_sparse_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r2md32_e12_otf, data: r2_medium_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r2dn32_e12_otf, data: r2_dense_size32,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r4sp32_e12_otf, data: r4_sparse_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r4md32_e12_otf, data: r4_medium_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r4dn32_e12_otf, data: r4_dense_size32,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r6sp32_e12_otf, data: r6_sparse_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r6md32_e12_otf, data: r6_medium_size32, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: r6dn32_e12_otf, data: r6_dense_size32,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}
+  - {name: mix32_e12_otf,  data: mixed_size32,     model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24}

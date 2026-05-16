@@ -21,6 +21,7 @@ from .extractor import (
 )
 from .update import BasicUpdateBlock
 from .corr import CorrBlock, coords_grid_3d, upflow_3d
+from .corr_otf import CorrBlockOnTheFly
 
 
 @dataclass
@@ -48,6 +49,14 @@ class RAFTDVCConfig:
     corr_levels: int = 4
     corr_radius: int = 4
 
+    # Correlation implementation:
+    #   "standard"     -- pre-compute full all-pairs corr (memory O(H^6))
+    #   "on_the_fly"   -- compute corr per-lookup (memory O(C * H^3 * K))
+    # See docs/plans/2026-05-14-on-the-fly-corr.md
+    corr_impl: str = "standard"
+    corr_chunk_size: int = 27
+    corr_use_checkpoint: bool = True
+
     # Update block configuration
     use_sep_conv: bool = True
 
@@ -62,11 +71,16 @@ class RAFTDVCConfig:
     uncertainty_mode: str = "none"
 
     def __post_init__(self):
-        """Validate uncertainty_mode."""
+        """Validate uncertainty_mode and corr_impl."""
         if self.uncertainty_mode not in ("none", "nll", "mol"):
             raise ValueError(
                 f"Invalid uncertainty_mode: {self.uncertainty_mode!r}. "
                 f"Must be one of: 'none', 'nll', 'mol'"
+            )
+        if self.corr_impl not in ("standard", "on_the_fly", "cuda_otf"):
+            raise ValueError(
+                f"Invalid corr_impl: {self.corr_impl!r}. "
+                f"Must be one of: 'standard', 'on_the_fly', 'cuda_otf'"
             )
 
     @property
@@ -88,6 +102,9 @@ class RAFTDVCConfig:
             'context_dropout': self.context_dropout,
             'corr_levels': self.corr_levels,
             'corr_radius': self.corr_radius,
+            'corr_impl': self.corr_impl,
+            'corr_chunk_size': self.corr_chunk_size,
+            'corr_use_checkpoint': self.corr_use_checkpoint,
             'use_sep_conv': self.use_sep_conv,
             'iters': self.iters,
             'mixed_precision': self.mixed_precision,
@@ -293,13 +310,32 @@ class RAFTDVC(nn.Module):
         fmap0 = fmap0.float()
         fmap1 = fmap1.float()
 
-        # Build correlation pyramid
-        corr_fn = CorrBlock(
-            fmap0, 
-            fmap1, 
-            num_levels=self.config.corr_levels, 
-            radius=self.config.corr_radius
-        )
+        # Build correlation block — standard precomputed, pure-PyTorch
+        # on-the-fly, or CUDA on-the-fly (fastest with low memory).
+        if self.config.corr_impl == "cuda_otf":
+            from .corr_otf_cuda import CorrBlockCUDA
+            corr_fn = CorrBlockCUDA(
+                fmap0,
+                fmap1,
+                num_levels=self.config.corr_levels,
+                radius=self.config.corr_radius,
+            )
+        elif self.config.corr_impl == "on_the_fly":
+            corr_fn = CorrBlockOnTheFly(
+                fmap0,
+                fmap1,
+                num_levels=self.config.corr_levels,
+                radius=self.config.corr_radius,
+                chunk_size=self.config.corr_chunk_size,
+                use_checkpoint=self.config.corr_use_checkpoint,
+            )
+        else:
+            corr_fn = CorrBlock(
+                fmap0,
+                fmap1,
+                num_levels=self.config.corr_levels,
+                radius=self.config.corr_radius,
+            )
         
         # Extract context features
         if self._use_amp:

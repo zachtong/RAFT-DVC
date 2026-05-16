@@ -94,16 +94,34 @@ results/
 outputs/
 logs/
 *.log
-data/
 test_output/
 *.pth
 *.pt
 *.ckpt
 
-# Checkpoints and experimental data (upload manually when ready)
-checkpoints/
-data_tif/
-datasets/
+# Checkpoints and experimental / synthetic datasets (manual upload only).
+# NOTE: these rules are anchored with a leading "/" so they only match the
+# repo root. A bare "data/" pattern would also catch src/data/ (source code),
+# silently dropping Python modules from Git.
+# Legacy pre-Phase-1 experimental volumes (~840 MB)
+/data/
+# Raw TIF inputs for legacy data generation
+/data_tif/
+# Phase-1 synthetic NPZ dataset (~60 GB)
+/data_phase1/
+# Future: Phase-2 128^3 dataset (multi-TB)
+/data_phase2/
+# Future: Phase-3 256^3 dataset (multi-TB)
+/data_phase3/
+# Local training checkpoints (upload selected .pth manually)
+/checkpoints/
+
+# Reference papers and prior-paper PDFs -- large, not version-controlled here.
+/reference/
+/Our_previous_paper/
+
+# Per-run / per-feature PDF reports (kept locally, not pushed).
+/reports/
 
 # Notebooks (keep .ipynb files but ignore checkpoints)
 # *.ipynb  # Uncomment if you don't want to track notebooks

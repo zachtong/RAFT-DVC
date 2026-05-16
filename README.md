@@ -44,10 +44,12 @@ RAFT-DVC/
 │   ├── preview_parameter_grid.py
 │   ├── slurm_train.sh            TACC Vista SLURM template
 │   ├── tacc_setup.sh             TACC first-time setup cheatsheet
-│   └── phase1/                   Phase-1 training/evaluation scripts  (to be added)
+│   ├── upload_dataset_to_tacc.sh rsync local data_phase1/ to $SCRATCH
+│   └── phase1/                   train_phase1.py, evaluate_phase1.py
 │
-├── datasets/phase1/              Local Phase-1 dataset (not tracked by git)
-├── reports/                      Auto-generated PDF test reports
+├── data_phase1/                  Local Phase-1 synthetic dataset (~60 GB, git-ignored)
+│                                 Layout: data_phase1/<config>/{train,val,test}/sample_*.npz
+├── reports/                      Auto-generated PDF test reports (git-ignored)
 ├── docs/                         Architecture & codebase guide (Chinese + English)
 ├── archive/                      Pre-Phase-1 experimental snapshot (read-only)
 └── CLAUDE.md                     Project rules for Claude Code

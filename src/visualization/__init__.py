@@ -28,6 +28,7 @@ from .side_by_side_render import (
 from .triple_volume_render import (
     render_triple_volume_pyvista,
 )
+from .eval_panels import render_flow_eval_4x3
 
 __all__ = [
     'render_uncertainty_volume_mpl',
@@ -39,4 +40,5 @@ __all__ = [
     'render_side_by_side_matplotlib',
     'auto_render_side_by_side',
     'render_triple_volume_pyvista',
+    'render_flow_eval_4x3',
 ]

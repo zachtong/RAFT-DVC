@@ -13,6 +13,7 @@ from .extractor import (
 )
 from .update import BasicUpdateBlock
 from .corr import CorrBlock
+from .corr_otf import CorrBlockOnTheFly
 
 __all__ = [
     'RAFTDVC',
@@ -23,5 +24,6 @@ __all__ = [
     'FullResEncoder',
     'ContextEncoder',
     'BasicUpdateBlock',
-    'CorrBlock'
+    'CorrBlock',
+    'CorrBlockOnTheFly',
 ]
