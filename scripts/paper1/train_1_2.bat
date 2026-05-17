@@ -20,9 +20,9 @@ set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 python scripts\phase1\train_phase1.py ^
     --model-config configs\models\raft_dvc_1_2_p2_r4.yaml ^
     --data-config  r4_medium_size64 ^
-    --data-root    data_paper1 ^
+    --data-root    data_paper1_v2 ^
     --output-root  checkpoints ^
-    --experiment-name paper1_1_2_r4md64 ^
+    --experiment-name paper1_v2_1_2_r4md64 ^
     --epochs 500 ^
     --batch-size 1 ^
     --max-lr 7.0e-5 ^
