@@ -35,11 +35,21 @@ cd "$PROJECT_DIR"
 mkdir -p logs
 
 # ---- Activate conda env ----------------------------------------------------
-# Source conda init explicitly so `conda activate` works inside non-interactive
-# SBATCH shell (default /bin/bash is non-interactive, doesn't read .bashrc).
-module load conda
+# Source conda init explicitly: SBATCH batch shell is NON-INTERACTIVE so it
+# doesn't read .bashrc.  TACC Vista has no `conda` module (per `module avail
+# conda` returning empty), so we source the user's miniconda install directly.
+# Try $WORK first (user's typical install), then $HOME, then fallback.
 # shellcheck disable=SC1091
-source "$(conda info --base)/etc/profile.d/conda.sh"
+if [ -f "$WORK/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$WORK/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif command -v conda >/dev/null 2>&1; then
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+else
+    echo "ERROR: cannot find conda init script" >&2
+    exit 2
+fi
 conda activate "$WORK/envs/raft-dvc"
 
 # ---- Parse case from case_matrix ------------------------------------------

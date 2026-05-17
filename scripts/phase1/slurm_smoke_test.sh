@@ -36,9 +36,18 @@ PROJECT_DIR="${PROJECT_DIR:-$WORK/projects/RAFT-DVC}"
 cd "$PROJECT_DIR"
 mkdir -p logs
 
-module load conda
+# Source conda init -- TACC Vista has no `conda` module; use user's miniconda.
 # shellcheck disable=SC1091
-source "$(conda info --base)/etc/profile.d/conda.sh"
+if [ -f "$WORK/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$WORK/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif command -v conda >/dev/null 2>&1; then
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+else
+    echo "ERROR: cannot find conda init script" >&2
+    exit 2
+fi
 conda activate "$WORK/envs/raft-dvc"
 
 export CHECKPOINTS_ROOT="$WORK/checkpoints/raft-dvc"
