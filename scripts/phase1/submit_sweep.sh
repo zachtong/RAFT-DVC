@@ -18,6 +18,18 @@ cd "$PROJECT_DIR"
 [ -f configs/phase1/case_matrix.yaml ] || { echo "MISSING configs/phase1/case_matrix.yaml"; exit 1; }
 [ -f scripts/phase1/slurm_train_otf.sh ] || { echo "MISSING slurm_train_otf.sh"; exit 1; }
 
+# Ensure the project conda env is active so case_helper.py can import yaml.
+# The login shell starts in (base) which typically lacks PyYAML.
+# shellcheck disable=SC1091
+if [ -z "${CONDA_PREFIX:-}" ] || [[ "$CONDA_PREFIX" != *"raft-dvc"* ]]; then
+    if [ -f "$WORK/miniconda3/etc/profile.d/conda.sh" ]; then
+        source "$WORK/miniconda3/etc/profile.d/conda.sh"
+    elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+        source "$HOME/miniconda3/etc/profile.d/conda.sh"
+    fi
+    conda activate "$WORK/envs/raft-dvc"
+fi
+
 # Defaults
 CONCURRENT="${CONCURRENT:-4}"
 INDICES="${INDICES:-}"
