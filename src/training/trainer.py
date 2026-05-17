@@ -336,11 +336,20 @@ class Trainer:
         if 'scheduler_state_dict' in checkpoint:
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
-        self.epoch = checkpoint.get('epoch', 0)
+        # Checkpoint stores the *last completed* epoch (save_checkpoint is called
+        # after train_epoch + validation finishes). The training loop iterates
+        # range(self.epoch, max_epochs), so resume must start at last+1 to avoid
+        # re-training the last completed epoch -- which also keeps scheduler step
+        # count aligned with OneCycleLR's strict total_steps budget.
+        last_completed = checkpoint.get('epoch', -1)
+        self.epoch = last_completed + 1
         self.global_step = checkpoint.get('global_step', 0)
         self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
-        
-        self.logger.info(f"Loaded checkpoint from {path} (epoch {self.epoch})")
+
+        self.logger.info(
+            f"Loaded checkpoint from {path} "
+            f"(last completed epoch={last_completed}, resuming at epoch={self.epoch})"
+        )
     
     def train(self):
         """Run full training."""
