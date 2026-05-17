@@ -44,6 +44,7 @@ if errorlevel 1 (
 
 echo ====================================================================
 echo All 3 paper-1 trainings completed: %DATE% %TIME%
-echo Checkpoints at: checkpoints\phase1\paper1_*
+echo Live checkpoints: C:\Zixiang_local_data\raft-dvc\paper1\phase1\paper1_v2_*
+echo OneDrive backup:  checkpoints\phase1\paper1_v2_*  (xcopied by each bat)
 echo ====================================================================
 endlocal
