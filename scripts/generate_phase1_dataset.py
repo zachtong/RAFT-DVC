@@ -186,20 +186,48 @@ def generate_split_single(generator, size, radius, density_name, split,
             )
 
 
-def generate_single_configs(sizes, counts, output_root, feature_map_size):
-    """Loop over sizes x 9 (radius, density) configs x splits."""
+def generate_single_configs(
+    sizes,
+    counts,
+    output_root,
+    feature_map_size,
+    only_configs=None,
+    input_disp_range=None,
+):
+    """Loop over sizes x (radius, density) configs x splits.
+
+    Args:
+        only_configs: Optional iterable of config names ("r4_medium" etc.) to
+            restrict generation to a subset of the 9 (R, density) grid.
+            ``None`` = generate all 9.
+        input_disp_range: Optional ``(low, high)`` tuple of input-space
+            displacement bounds (voxels).  When set, the generator uses
+            "input" disp mode (fixed input deformation regardless of
+            encoder downsample factor) instead of the default "fm" mode
+            (fixed fm-scale difficulty).
+    """
+    if only_configs is not None:
+        only_configs = set(only_configs)
+
     for size in sizes:
         for radius in RADII:
             for density_name, density_val in DENSITIES:
+                cfg_id = f"r{radius}_{density_name}"
+                if only_configs is not None and cfg_id not in only_configs:
+                    continue
                 name = single_config_dirname(size, radius, density_name)
                 print(f"\n=== {name} ===")
                 t_cfg_start = time.time()
-                generator = Phase1SampleGenerator(
+                gen_kwargs = dict(
                     size=size,
                     radius=radius,
                     density_per_1000=density_val,
                     feature_map_size=feature_map_size,
                 )
+                if input_disp_range is not None:
+                    gen_kwargs["input_disp_min"] = input_disp_range[0]
+                    gen_kwargs["input_disp_max"] = input_disp_range[1]
+                generator = Phase1SampleGenerator(**gen_kwargs)
                 for split, n in counts.items():
                     if n > 0:
                         generate_split_single(
@@ -337,22 +365,73 @@ def main():
     parser.add_argument('--viz-samples', type=int, default=10,
                         help='Number of train samples to visualize per '
                              'config (default: 10)')
+    parser.add_argument(
+        '--only-config',
+        type=str, default=None,
+        help='Comma-separated config IDs (e.g. "r4_medium" or '
+             '"r4_medium,r2_sparse") to restrict generation to a subset. '
+             'Format: "r{R}_{density}" with R in {2,4,6} and density in '
+             '{sparse,medium,dense}. When set, mixed is auto-skipped.',
+    )
+    parser.add_argument(
+        '--input-disp-range',
+        type=float, nargs=2, metavar=('LOW', 'HIGH'), default=None,
+        help='Two floats: input-space displacement range in voxels '
+             '(e.g. "0.6 6"). When set, the generator uses input-space '
+             'mode: input_max_disp ~ U(LOW, HIGH); fm-disp is derived. '
+             'Used for paper-1 architecture-ablation experiments where '
+             'we fix the physical deformation regardless of encoder.',
+    )
     parser.set_defaults(with_mixed=True, with_viz=True)
     args = parser.parse_args()
+
+    # Parse --only-config into a set; auto-skip mixed when restricted.
+    only_configs = None
+    if args.only_config:
+        only_configs = [c.strip() for c in args.only_config.split(',') if c.strip()]
+        # Sanity-check each entry
+        valid_density = {n for n, _ in DENSITIES}
+        for cfg in only_configs:
+            parts = cfg.split('_')
+            if (len(parts) != 2 or not parts[0].startswith('r')
+                    or parts[1] not in valid_density):
+                raise SystemExit(
+                    f"--only-config entry {cfg!r} invalid; expected "
+                    f"'r{{2,4,6}}_{{sparse,medium,dense}}'."
+                )
+        args.with_mixed = False  # mixed makes no sense when restricting
+
+    input_disp_range = None
+    if args.input_disp_range is not None:
+        lo, hi = args.input_disp_range
+        if lo <= 0 or hi <= lo:
+            raise SystemExit(
+                f"--input-disp-range invalid: LOW={lo}, HIGH={hi} "
+                f"(require 0 < LOW < HIGH)."
+            )
+        input_disp_range = (float(lo), float(hi))
 
     output_root = PROJECT_ROOT / args.output_root
     output_root.mkdir(parents=True, exist_ok=True)
 
     counts = {'train': args.train, 'val': args.val, 'test': args.test}
-    n_single = len(args.sizes) * len(RADII) * len(DENSITIES)
+    n_per_size = (len(only_configs) if only_configs is not None
+                  else len(RADII) * len(DENSITIES))
+    n_single = len(args.sizes) * n_per_size
     n_mixed = len(args.sizes) if args.with_mixed else 0
+    disp_str = (f"input-space [{input_disp_range[0]}, {input_disp_range[1]}] voxels"
+                if input_disp_range is not None
+                else f"fm-space [0.3, 3] x downsample (default)")
+    cfg_str = (",".join(only_configs) if only_configs is not None
+               else "all 9 (r{2,4,6} x {sp,md,dn})")
     print(
         f"=== Generation plan ===\n"
         f"  sizes              : {args.sizes}\n"
         f"  feature_map_size   : {args.feature_map_size}\n"
-        f"  train/val/test     : {counts['train']}/{counts['val']}/{counts['test']}\n"
-        f"  single configs     : {n_single}\n"
+        f"  disp mode          : {disp_str}\n"
+        f"  single configs     : {cfg_str}  ({n_per_size} per size)\n"
         f"  mixed configs      : {n_mixed}\n"
+        f"  train/val/test     : {counts['train']}/{counts['val']}/{counts['test']}\n"
         f"  total configs      : {n_single + n_mixed}\n"
         f"  total samples      : {(n_single + n_mixed) * sum(counts.values())}\n"
         f"  visualizations     : {'yes' if args.with_viz else 'no'}\n"
@@ -364,6 +443,8 @@ def main():
     generate_single_configs(
         sizes=args.sizes, counts=counts, output_root=output_root,
         feature_map_size=args.feature_map_size,
+        only_configs=only_configs,
+        input_disp_range=input_disp_range,
     )
 
     if args.with_mixed:

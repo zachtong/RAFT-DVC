@@ -165,7 +165,25 @@ def apply_noise(volume, gain, read_sigma, rng):
 # -----------------------------------------------------------------------------
 
 class Phase1SampleGenerator:
-    """Generate one (I1, I2, flow) sample following finalized Phase-1 design."""
+    """Generate one (I1, I2, flow) sample following finalized Phase-1 design.
+
+    Two displacement-range modes (mutually exclusive):
+
+    1) FM-space mode (default, backward-compatible).  Specify ``fm_min``,
+       ``fm_max``, ``feature_map_size``.  ``fm_target ~ U(fm_min, fm_max)``
+       is drawn in feature-map voxels; input-space max disp is then
+       ``fm_target * downsample_factor`` where
+       ``downsample_factor = size / feature_map_size``.  This gives a
+       constant FM-scale difficulty regardless of input resolution.
+
+    2) Input-space mode (paper-1 architecture-ablation experiments).
+       Specify ``input_disp_min`` and ``input_disp_max``.
+       ``input_max_disp ~ U(input_disp_min, input_disp_max)`` is drawn
+       directly in input voxels; FM-disp varies inversely with
+       downsample factor.  Use this when comparing encoders at a fixed
+       input observation -- all encoders see the same physical
+       deformation regardless of architecture.
+    """
 
     def __init__(
         self,
@@ -181,12 +199,12 @@ class Phase1SampleGenerator:
         noise_gain=500.0,
         noise_read_sigma=0.01,
         type_probs=(0.10, 0.45, 0.45),
+        input_disp_min=None,
+        input_disp_max=None,
     ):
         self.size = int(size)
         self.radius = int(radius)
         self.density = float(density_per_1000)
-        self.fm_min = float(fm_min)
-        self.fm_max = float(fm_max)
         self.feature_map_size = int(feature_map_size)
         self.downsample_factor = self.size / self.feature_map_size
         self.psf_sigma = float(psf_sigma)
@@ -196,17 +214,33 @@ class Phase1SampleGenerator:
         self.noise_read_sigma = float(noise_read_sigma)
         self.type_probs = tuple(type_probs)
 
+        # Mode selection: input-disp explicit overrides fm-disp.
+        if input_disp_min is not None or input_disp_max is not None:
+            if input_disp_min is None or input_disp_max is None:
+                raise ValueError(
+                    "input_disp_min and input_disp_max must both be set."
+                )
+            self.disp_mode = "input"
+            self.input_disp_min = float(input_disp_min)
+            self.input_disp_max = float(input_disp_max)
+            # Derived fm range (used only for metadata / buffer):
+            self.fm_min = self.input_disp_min / self.downsample_factor
+            self.fm_max = self.input_disp_max / self.downsample_factor
+        else:
+            self.disp_mode = "fm"
+            self.fm_min = float(fm_min)
+            self.fm_max = float(fm_max)
+            self.input_disp_min = self.fm_min * self.downsample_factor
+            self.input_disp_max = self.fm_max * self.downsample_factor
+
         # Rendering buffer: covers bead radius + AA taper + 3*PSF sigma.
         self.buffer_render = int(
             np.ceil(self.radius + self.edge_softness + 3.0 * self.psf_sigma)
         ) + 1
 
-        # Displacement buffer: enough for the largest possible max disp.
-        # Use fm_max (upper bound) so the same expanded volume works for every
-        # sample drawn from U(fm_min, fm_max).
-        self.max_disp_buffer = int(
-            np.ceil(self.fm_max * self.downsample_factor)
-        ) + 1
+        # Displacement buffer: enough for the largest possible input-space
+        # disp, regardless of which mode produced it.
+        self.max_disp_buffer = int(np.ceil(self.input_disp_max)) + 1
 
         self.buffer_total = self.buffer_render + self.max_disp_buffer
         self.expanded_size = self.size + 2 * self.buffer_total
@@ -254,8 +288,15 @@ class Phase1SampleGenerator:
         )
 
         # ---------- 2. Deformation sampling ----------
-        fm_target = float(rng.uniform(self.fm_min, self.fm_max))
-        input_max_disp = fm_target * self.downsample_factor
+        # In "fm" mode draw fm_target then scale to input; in "input" mode
+        # draw input_max_disp directly and derive fm_target inversely.
+        if self.disp_mode == "input":
+            input_max_disp = float(rng.uniform(self.input_disp_min,
+                                               self.input_disp_max))
+            fm_target = input_max_disp / self.downsample_factor
+        else:
+            fm_target = float(rng.uniform(self.fm_min, self.fm_max))
+            input_max_disp = fm_target * self.downsample_factor
         flow_fn, flow_grid, deform_meta = self._deform_sampler.sample(
             target_max_disp=input_max_disp, rng=rng
         )
@@ -312,6 +353,9 @@ class Phase1SampleGenerator:
             'size': int(self.size),
             'downsample_factor': float(self.downsample_factor),
             'feature_map_size': int(self.feature_map_size),
+            'disp_mode': self.disp_mode,
+            'input_disp_min': float(self.input_disp_min),
+            'input_disp_max': float(self.input_disp_max),
             'seed': int(seed),
             'num_beads_placed': int(place_info['placed']),
             'num_beads_requested': int(place_info['requested']),

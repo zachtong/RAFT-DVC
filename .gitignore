@@ -158,3 +158,6 @@ temp_*/
 debug_*.py
 visualizations/
 QUICK_START_CN.md
+
+# Local-only notes (TACC workflow, lessons learned, personal info)
+notes/
