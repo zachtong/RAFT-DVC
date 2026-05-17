@@ -5,6 +5,16 @@ REM ============================================================================
 REM Mid-size case (~7 h for 500 epoch).  fm=16, same as your earlier validated
 REM workload.  batch=8 with standard CorrBlock fits comfortably (~20 GB peak).
 REM
+REM LR choice (revised 2026-05-17 after first attempt at max_lr=2e-4 plateaued):
+REM   Adam's second-moment normalization makes step size ~ LR independent of
+REM   batch.  The conventional sqrt scaling (2e-4 for batch=8 from 4e-4 baseline
+REM   at batch=24) is *too conservative* for Adam -- it halves the per-step
+REM   movement and leaves the model unable to escape init within OneCycleLR's
+REM   short peak window (epochs 25-50).  Empirically: 200 epochs at 2e-4 made
+REM   zero progress.
+REM   Fix: keep max_lr=4e-4 (same as 1/8 case); 3x more updates per epoch
+REM   (150 vs 50) already compensates for batch-noise increase.
+REM
 REM Output layout / resume behaviour: see train_1_8.bat header.
 REM =============================================================================
 
@@ -34,7 +44,7 @@ python scripts\phase1\train_phase1.py ^
     --experiment-name %EXP_NAME% ^
     --epochs 500 ^
     --batch-size 8 ^
-    --max-lr 2.0e-4 ^
+    --max-lr 4.0e-4 ^
     --num-workers 8 %RESUME_ARG%
 
 if errorlevel 1 (
