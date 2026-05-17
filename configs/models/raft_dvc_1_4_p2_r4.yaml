@@ -1,0 +1,54 @@
+# Model Configuration: RAFT-DVC with 1/4 Resolution Encoder, L=2 (paper-2 A2)
+#
+# Variant of raft_dvc_1_4_p3_r4.yaml with corr_levels forced from 3 -> 2 so the
+# correlation lookup is *identical* to 1/1 and 1/2 encoders in the paper-2 A
+# sweep (fm=16, L=2, r=4 -> every encoder samples the same 9^3 * 2 = 1458 corr
+# values per fm voxel).  This isolates "encoder downsample factor" as the sole
+# variable in the A-group ablation.
+#
+# Max search radius: r * 2^(L-1) = 4 * 2 = 8 fm-voxels = 32 input-voxels.
+# Paper-2 sweep max disp is ~6 input-voxel, so coverage is ample.
+
+name: "RAFT-DVC-1/4-P2-R4"
+description: >
+  Paper-2 A2 variant: 1/4 encoder with corr_levels=2 enforced to match
+  the rest of the A sweep (1/1+size16, 1/2+size32 already use L=2).
+  Use with input size 64 -> feature map 16x16x16.
+
+architecture:
+  encoder_type: "1/4"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # Correlation pyramid -- matches A1 encoders (1/1, 1/2)
+  corr_levels: 2
+  corr_radius: 4
+
+  use_sep_conv: true
+
+  iters: 12
+
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+
+  # Performance estimates (paper-2 input=64 -> fm=16)
+  recommended_batch_size: 24
+  memory_usage_estimate: "~40-50 GB on GH200 at batch=24 fp16"
+  training_time_relative: 2.0
+
+  # Capabilities (with L=2, r=4)
+  max_displacement_estimate: "~32 voxels (input space)"
+  spatial_precision: "Improved for sub-voxel measurements"
+
+  recommended_for:
+    - "Paper-2 A-group size extension at input=64"
+    - "Balanced precision and efficiency"
