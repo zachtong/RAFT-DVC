@@ -21,7 +21,12 @@ from .extractor import (
 )
 from .update import BasicUpdateBlock
 from .corr import CorrBlock, coords_grid_3d, upflow_3d
-from .corr_otf import CorrBlockOnTheFly
+
+# NOTE: ``CorrBlockOnTheFly`` and ``CorrBlockCUDA`` are imported lazily
+# inside ``forward()`` so this module loads even when those optional
+# files are absent (e.g. on TACC Vista where the CUDA OTF kernel and
+# pure-PyTorch OTF source are not deployed because all training uses
+# the standard CorrBlock).
 
 
 @dataclass
@@ -321,6 +326,7 @@ class RAFTDVC(nn.Module):
                 radius=self.config.corr_radius,
             )
         elif self.config.corr_impl == "on_the_fly":
+            from .corr_otf import CorrBlockOnTheFly
             corr_fn = CorrBlockOnTheFly(
                 fmap0,
                 fmap1,

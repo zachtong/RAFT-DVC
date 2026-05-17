@@ -13,7 +13,18 @@ from .extractor import (
 )
 from .update import BasicUpdateBlock
 from .corr import CorrBlock
-from .corr_otf import CorrBlockOnTheFly
+
+# Optional / development-only correlation implementations.  Imported
+# lazily so the package loads on deployment environments where these
+# files are absent (e.g. TACC Vista, where only the standard CorrBlock
+# is used).  Access via ``from src.core.corr_otf import CorrBlockOnTheFly``
+# directly when needed.
+try:
+    from .corr_otf import CorrBlockOnTheFly  # noqa: F401
+    _HAS_OTF = True
+except ImportError:
+    CorrBlockOnTheFly = None  # type: ignore[assignment]
+    _HAS_OTF = False
 
 __all__ = [
     'RAFTDVC',
