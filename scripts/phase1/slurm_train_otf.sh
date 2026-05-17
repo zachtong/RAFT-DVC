@@ -21,8 +21,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32          # OTF workers need many CPU cores
-#SBATCH --gres=gpu:1
 #SBATCH --time=08:00:00             # safe margin over expected ~3-4h per case
+# Note: gh partition implies 1 GH200 GPU per node -- do NOT specify
+# --gres=gpu:1 (TACC Vista rejects it with "Invalid generic resource").
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=zachtong@utexas.edu
 

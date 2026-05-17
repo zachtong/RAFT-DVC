@@ -25,8 +25,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:1
 #SBATCH --time=00:30:00
+# Note: gh-dev partition implies 1 GH200 per node -- no --gres needed.
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=zachtong@utexas.edu
 
