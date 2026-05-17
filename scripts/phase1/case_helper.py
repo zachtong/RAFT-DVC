@@ -73,11 +73,24 @@ def main() -> None:
         )
 
     case = cases[args.index]
-    # Emit shell-evalable assignments (quote paths/names that may contain spaces).
+    # Emit shell-evalable assignments for the 4 required fields, plus any
+    # optional fields present (uppercased var name).  Numeric values pass
+    # through unquoted; strings/paths quoted via shlex.
     print(f"NAME={shlex.quote(str(case['name']))}")
     print(f"DATA={shlex.quote(str(case['data']))}")
     print(f"MODEL={shlex.quote(str(case['model']))}")
     print(f"BATCH={int(case['batch'])}")
+
+    # Optional fields: emit if present (used by paper-2 disp-scan matrix).
+    _required = {"name", "data", "model", "batch"}
+    for key, value in case.items():
+        if key in _required:
+            continue
+        var_name = key.upper()
+        if isinstance(value, (int, float)):
+            print(f"{var_name}={value}")
+        else:
+            print(f"{var_name}={shlex.quote(str(value))}")
 
 
 if __name__ == "__main__":

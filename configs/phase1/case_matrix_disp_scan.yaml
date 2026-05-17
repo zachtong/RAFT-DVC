@@ -1,0 +1,68 @@
+# =============================================================================
+# Paper-2 displacement scan case matrix
+# =============================================================================
+# Purpose: characterize the "learnability viability boundary" predicted by
+# the paper-2 core thesis (fm-richness x fm-disp-resolvability formula).
+#
+# Design (locked-in 2026-05-17):
+#   Fixed:   encoder = 1/2 (sweet-spot architecture), input size = 64,
+#            iter = 12, batch = 24, OTF data generation, 500 epoch.
+#   Varied:  (bead config) x (displacement magnitude) = 4 x 5 = 20 cases.
+#
+# Why 1/2 only: focused study on architecture-controlled disp scan.
+# Other encoders' viability curves can be inferred from current sweep 708xxx
+# at fm-disp ~1 plus this scan; full 4-encoder disp scan would be ~80 cases
+# (too heavy for one TACC sub-allocation).
+#
+# Naming:  ds_<config>_d<input_disp_max>
+#   ds_r4md_d6   = r4_medium, input_disp ~U(3, 6), fm-disp ~U(1.5, 3) (sweet spot)
+#   ds_r2sp_d2   = r2_sparse, input_disp ~U(1, 2),  fm-disp ~U(0.5, 1)  (marginal)
+#   ds_r2sp_d12  = r2_sparse, input_disp ~U(6, 12), fm-disp ~U(3, 6)    (large)
+#   etc.
+# =============================================================================
+
+cases:
+  # ------------------------------------------------------------
+  # Displacement level 1:  fm-disp ~U(0.05, 0.1)  EXTREME sub-voxel (expect fail)
+  # input_disp ~U(0.1, 0.2) at 1/2 + size=64 (ratio=2)
+  # ------------------------------------------------------------
+  - {name: ds_r4md_d02,   data: r4_medium, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.1, input_disp_max: 0.2}
+  - {name: ds_r2sp_d02,   data: r2_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.1, input_disp_max: 0.2}
+  - {name: ds_r6dn_d02,   data: r6_dense,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.1, input_disp_max: 0.2}
+  - {name: ds_r6sp_d02,   data: r6_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.1, input_disp_max: 0.2}
+
+  # ------------------------------------------------------------
+  # Displacement level 2:  fm-disp ~U(0.15, 0.3)  sub-voxel (marginal)
+  # input_disp ~U(0.3, 0.6)
+  # ------------------------------------------------------------
+  - {name: ds_r4md_d06,   data: r4_medium, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.3, input_disp_max: 0.6}
+  - {name: ds_r2sp_d06,   data: r2_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.3, input_disp_max: 0.6}
+  - {name: ds_r6dn_d06,   data: r6_dense,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.3, input_disp_max: 0.6}
+  - {name: ds_r6sp_d06,   data: r6_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 0.3, input_disp_max: 0.6}
+
+  # ------------------------------------------------------------
+  # Displacement level 3:  fm-disp ~U(0.5, 1.0)  learnable lower bound
+  # input_disp ~U(1.0, 2.0)
+  # ------------------------------------------------------------
+  - {name: ds_r4md_d2,    data: r4_medium, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 1.0, input_disp_max: 2.0}
+  - {name: ds_r2sp_d2,    data: r2_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 1.0, input_disp_max: 2.0}
+  - {name: ds_r6dn_d2,    data: r6_dense,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 1.0, input_disp_max: 2.0}
+  - {name: ds_r6sp_d2,    data: r6_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 1.0, input_disp_max: 2.0}
+
+  # ------------------------------------------------------------
+  # Displacement level 4:  fm-disp ~U(1.5, 3)  SWEET SPOT (best for RAFT)
+  # input_disp ~U(3.0, 6.0)
+  # ------------------------------------------------------------
+  - {name: ds_r4md_d6,    data: r4_medium, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 3.0, input_disp_max: 6.0}
+  - {name: ds_r2sp_d6,    data: r2_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 3.0, input_disp_max: 6.0}
+  - {name: ds_r6dn_d6,    data: r6_dense,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 3.0, input_disp_max: 6.0}
+  - {name: ds_r6sp_d6,    data: r6_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 3.0, input_disp_max: 6.0}
+
+  # ------------------------------------------------------------
+  # Displacement level 5:  fm-disp ~U(3, 6)  large disp (test radius limit)
+  # input_disp ~U(6.0, 12.0); corr_radius=4 with corr_levels=2 -> search up to ~12 fm voxels
+  # ------------------------------------------------------------
+  - {name: ds_r4md_d12,   data: r4_medium, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 6.0, input_disp_max: 12.0}
+  - {name: ds_r2sp_d12,   data: r2_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 6.0, input_disp_max: 12.0}
+  - {name: ds_r6dn_d12,   data: r6_dense,  model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 6.0, input_disp_max: 12.0}
+  - {name: ds_r6sp_d12,   data: r6_sparse, model: configs/models/raft_dvc_1_2_p2_r4.yaml, batch: 24, max_lr: 4.0e-4, input_disp_min: 6.0, input_disp_max: 12.0}
