@@ -36,12 +36,13 @@
 // We use `torch::` qualified APIs throughout this file (TORCH_CHECK already
 // works since c10/util/Exception.h provides it).  Map the few `torch::*`
 // type/factory references to their at:: equivalents so we don't need
-// torch/all.h.
+// torch/all.h.  Note ATen names the fp32 scalar type `kFloat` (not
+// `kFloat32`); we alias it via a constexpr.
 namespace torch {
     using ::at::Tensor;
     using ::at::empty;
     using ::at::zeros_like;
-    using ::at::kFloat32;
+    constexpr auto kFloat32 = ::at::kFloat;
 }
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
