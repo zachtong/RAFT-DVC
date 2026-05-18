@@ -224,6 +224,47 @@ def _corr_one_level_v4(fmap1, fmap2_i, coords, radius, scale, n_groups=8):
 
 
 # -----------------------------------------------------------------------------
+# V5 autograd Function: v4 + 4-warp blocks (128 threads per block)
+# -----------------------------------------------------------------------------
+# V4 was limited by 32 threads/block.  V5 uses 128 threads (4 warps) where
+# all warps share the f1 shared-mem region but each has its own f2 slab.
+# Each warp handles 1/4 of the iter range -> ~4x more concurrent work per
+# block.  Default n_groups=4 (vs 8 in v4) since v5 has more intra-block
+# parallelism.
+
+class _CorrOneLevelV5Fn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, fmap1, fmap2_i, coords, radius, scale, n_groups=4):
+        mod = _load_module()
+        f1 = fmap1.float().contiguous()
+        f2 = fmap2_i.float().contiguous()
+        c = coords.float().contiguous()
+        f1_cl = f1.permute(0, 2, 3, 4, 1).contiguous()
+        f2_cl = f2.permute(0, 2, 3, 4, 1).contiguous()
+        out = mod.forward_one_level_v5(
+            f1_cl, f2_cl, c, int(radius), float(scale), int(n_groups),
+        )
+        ctx.save_for_backward(f1, f2, c)
+        ctx.radius = int(radius)
+        ctx.scale = float(scale)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        mod = _load_module()
+        f1, f2, c = ctx.saved_tensors
+        grad_out = grad_out.float().contiguous()
+        gf1, gf2, gc = mod.backward_one_level(
+            f1, f2, c, grad_out, ctx.radius, ctx.scale,
+        )
+        return gf1, gf2, gc, None, None, None
+
+
+def _corr_one_level_v5(fmap1, fmap2_i, coords, radius, scale, n_groups=4):
+    return _CorrOneLevelV5Fn.apply(fmap1, fmap2_i, coords, radius, scale, n_groups)
+
+
+# -----------------------------------------------------------------------------
 # Multi-level wrapper matching CorrBlock interface
 # -----------------------------------------------------------------------------
 
@@ -383,6 +424,61 @@ class CorrBlockCUDAv4:
             fmap2_i = self.fmap2_pyramid[level]
             scale = 1.0 / (2 ** level)
             corr_l = _corr_one_level_v4(
+                self.fmap1, fmap2_i, coords, self.radius, scale, self.n_groups,
+            )
+            parts.append(corr_l)
+        out = torch.cat(parts, dim=1)
+        return out.contiguous().float()
+
+
+class CorrBlockCUDAv5:
+    """V5: 4-warp cooperative tiling + neighbor-group parallelism.
+
+    Same scatter trick + atomicAdd accumulation as v4, but with 128 threads
+    (4 warps) per block.  All warps share one f1 region in smem; each warp
+    has its private f2 region and processes 1/4 of the iter range.
+    """
+
+    def __init__(
+        self,
+        fmap1: torch.Tensor,
+        fmap2: torch.Tensor,
+        num_levels: int = 4,
+        radius: int = 4,
+        n_groups: int = 4,
+    ) -> None:
+        if fmap1.shape != fmap2.shape:
+            raise ValueError(
+                f"fmap1 and fmap2 must match; got {tuple(fmap1.shape)} vs "
+                f"{tuple(fmap2.shape)}"
+            )
+        if fmap1.ndim != 5:
+            raise ValueError(f"expected 5D fmaps; got {fmap1.ndim}D")
+        if not (fmap1.is_cuda and fmap2.is_cuda):
+            raise RuntimeError("CorrBlockCUDAv5 requires CUDA tensors")
+        if fmap1.shape[1] % 32 != 0:
+            raise ValueError(
+                f"v5 requires C divisible by 32 (got C={fmap1.shape[1]})."
+            )
+
+        self.num_levels = num_levels
+        self.radius = radius
+        self.n_groups = n_groups
+        self.fmap1 = fmap1
+
+        self.fmap2_pyramid: List[torch.Tensor] = [fmap2]
+        for _ in range(num_levels - 1):
+            prev = self.fmap2_pyramid[-1]
+            self.fmap2_pyramid.append(F.avg_pool3d(prev, kernel_size=2, stride=2))
+
+    def __call__(self, coords: torch.Tensor) -> torch.Tensor:
+        if coords.ndim != 5 or coords.shape[1] != 3:
+            raise ValueError(f"coords must be (B,3,H,W,D); got {tuple(coords.shape)}")
+        parts = []
+        for level in range(self.num_levels):
+            fmap2_i = self.fmap2_pyramid[level]
+            scale = 1.0 / (2 ** level)
+            corr_l = _corr_one_level_v5(
                 self.fmap1, fmap2_i, coords, self.radius, scale, self.n_groups,
             )
             parts.append(corr_l)
