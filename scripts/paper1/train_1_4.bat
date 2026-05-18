@@ -7,24 +7,39 @@ REM
 REM Memory strategy (revised 2026-05-18 after prior dead-zero failures):
 REM   Std CorrBlock at fm=16 OOMs above batch=10 on 5090 32GB.  Use CUDA OTF v5
 REM   (cooperative-tiled multi-warp kernel) to skip storing the corr pyramid,
-REM   freeing memory for batch=16.  Closer to 1/8 case's batch=24 for cleaner
-REM   ablation than batch=8 std (which the prior attempt failed at).
+REM   freeing memory for batch=16.
 REM
-REM LR: max_lr=4e-4 (same as 1/8 case).  Adam does not require batch scaling.
-REM     Earlier sqrt-scaled max_lr=2e-4 caused 200-epoch dead-zero failure --
-REM     halved step size left model stuck in init attractor.
+REM This bat must initialise MSVC env (vcvars64.bat) so the v5 CUDA extension
+REM can JIT-compile on first run.  After first successful build, subsequent
+REM runs load the cached .pyd and don't need MSVC -- but we keep vcvars init
+REM here for robustness across PyTorch upgrades / cache invalidations.
 REM
 REM FALLBACK if batch=16 OOMs:
-REM   1. Open this bat in editor.
-REM   2. Change "--batch-size 16" to "--batch-size 12".
-REM   3. Optionally change EXP_NAME to ..._b12 to keep separate ckpt dirs.
-REM   4. Re-run.
-REM   (Note: wall-clock at B=12 is similar to B=16 -- per-step faster, more steps.)
-REM
-REM Output layout / resume behaviour: see train_1_8.bat header.
+REM   1. Edit this bat, change "--batch-size 16" -> "--batch-size 12".
+REM   2. Optionally rename EXP_NAME to _b12 to keep separate ckpt dirs.
+REM   3. Re-run.
 REM =============================================================================
 
 setlocal
+
+REM ---- Find MSVC vcvars64.bat (needed for CUDA extension JIT) ---------------
+set "VCVARS="
+for %%P in (
+    "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+    "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
+) do (
+    if exist %%P set "VCVARS=%%P"
+)
+if defined VCVARS (
+    echo [vcvars] Using %VCVARS%
+    call %VCVARS% >nul
+)
+
+REM Limit CUDA arch compile target to 5090 (Blackwell sm_120) for speed
+set TORCH_CUDA_ARCH_LIST=12.0
+
 cd /d %~dp0..\..\
 
 set OUTPUT_ROOT=C:\Zixiang_local_data\raft-dvc\paper1

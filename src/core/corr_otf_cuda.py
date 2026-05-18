@@ -58,19 +58,40 @@ def _ensure_cuda_home() -> None:
 def _try_import_cached_pyd():
     """Fast path: import the previously compiled .pyd directly, bypassing
     the torch JIT ninja-staleness check. Avoids the need for ninja/MSVC on
-    PATH for environments that have already built the extension once."""
+    PATH for environments that have already built the extension once.
+
+    Cache directory follows torch's naming convention:
+        %LOCALAPPDATA%\\torch_extensions\\torch_extensions\\Cache\\py<P>_cu<C>\\<ext>
+    where <P> is e.g. 310 (Python 3.10), <C> is e.g. 124 / 128 (CUDA 12.4 / 12.8).
+    We probe the actual PyTorch + Python versions at runtime so this works
+    across PyTorch upgrades (e.g. cu124 -> cu128)."""
     import importlib.util
-    cache_dir = Path(os.path.expandvars(
-        r"%LOCALAPPDATA%\torch_extensions\torch_extensions\Cache\py310_cu124"
+    import sys as _sys
+    import torch as _torch
+    py_tag = f"py{_sys.version_info.major}{_sys.version_info.minor}"
+    cu_tag = f"cu{(_torch.version.cuda or '').replace('.', '')}" if _torch.version.cuda else "cpu"
+    base = Path(os.path.expandvars(
+        rf"%LOCALAPPDATA%\torch_extensions\torch_extensions\Cache\{py_tag}_{cu_tag}"
         r"\raft_dvc_corr_otf_cuda"
     ))
-    pyd = cache_dir / "raft_dvc_corr_otf_cuda.pyd"
-    if not pyd.exists():
-        return None
-    spec = importlib.util.spec_from_file_location("raft_dvc_corr_otf_cuda", str(pyd))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    candidates = [base]
+    # Glob for siblings in case PyTorch minor versions create sub-dirs
+    parent = base.parent.parent
+    if parent.exists():
+        for sib in parent.iterdir():
+            if sib.is_dir() and sib.name.startswith(py_tag):
+                p = sib / "raft_dvc_corr_otf_cuda"
+                if p != base and p not in candidates:
+                    candidates.append(p)
+    for cache_dir in candidates:
+        pyd = cache_dir / "raft_dvc_corr_otf_cuda.pyd"
+        if not pyd.exists():
+            continue
+        spec = importlib.util.spec_from_file_location("raft_dvc_corr_otf_cuda", str(pyd))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    return None
 
 
 def _load_module():
