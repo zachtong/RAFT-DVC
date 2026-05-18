@@ -1,0 +1,48 @@
+# Model Configuration: RAFT-DVC, 1/4 encoder, CUDA OTF v5 (multi-warp tiling)
+#
+# Variant of raft_dvc_1_4_p3_r4.yaml that selects the CUDA OTF v5 forward
+# kernel (cooperative tiling + 4-warp blocks + neighbor-group parallelism).
+# Backward currently uses v1 kernel as fallback.
+#
+# Why v5 here: at fm=16 batch=16+, std CorrBlock OOMs on 5090 32GB.  v5
+# avoids storing the corr pyramid, enabling batch=16 to fit (~28 GB).
+# At fm=16 v5 is ~1.4x slower than std per-step, but allows 2x larger batch
+# than std max -- net wall-clock comparable, ablation cleaner (closer to
+# 1/8 case's batch=24).
+#
+# Requires the JIT-compiled CUDA extension (see src/core/corr_otf_cuda.py).
+
+name: "RAFT-DVC-1/4-P3-R4-CUDA-OTF-V5"
+description: >
+  Paper-1 1/4 case using CUDA OTF v5 forward kernel for memory efficiency
+  at large batch on 5090 32GB.
+
+architecture:
+  encoder_type: "1/4"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 3
+  corr_radius: 4
+
+  # CUDA OTF v5: cooperative tiling + multi-warp + atomicAdd scatter
+  corr_impl: "cuda_otf_v5"
+
+  use_sep_conv: true
+  iters: 12
+
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+  recommended_batch_size: 16
+  memory_usage_estimate: "~28 GB at batch=16 on 5090 32GB (std CorrBlock OOMs at batch=12+)"
+  training_time_relative: 1.4  # ~1.4x slower per step than std,
+                                # but batch=16 vs std's max batch=8 -> similar epoch wall-clock
