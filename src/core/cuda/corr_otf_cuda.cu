@@ -685,36 +685,42 @@ __global__ void corr_otf_forward_kernel_v3(
                         // Bounds: each component must be in [0, rd-1].
                         float dot_norm = dot * norm;
 
+                        // Neighbor index layout: (H_idx, D_idx, W_idx) -- H slowest,
+                        // W fastest -- matching v1's convention (see v1 decode at
+                        // line 171-174).  iy_loc varies H, ix_loc varies W,
+                        // iz_loc varies D.  So n_idx = H_idx * rd^2 + D_idx * rd + W_idx
+                        //                          = (iy-cy)*rd2 + (iz-cz)*rd + (ix-cx).
+
                         if (iy_loc < rd && ix_loc < rd && iz_loc < rd) {
-                            int n_idx = iy_loc * rd2 + ix_loc * rd + iz_loc;
+                            int n_idx = iy_loc * rd2 + iz_loc * rd + ix_loc;
                             corr_self[n_idx * spatial] += dot_norm * w_y0 * w_x0 * w_z0;
                         }
                         if (iy_loc < rd && ix_loc < rd && iz_loc > 0) {
-                            int n_idx = iy_loc * rd2 + ix_loc * rd + (iz_loc - 1);
+                            int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + ix_loc;
                             corr_self[n_idx * spatial] += dot_norm * w_y0 * w_x0 * w_z1;
                         }
                         if (iy_loc < rd && ix_loc > 0 && iz_loc < rd) {
-                            int n_idx = iy_loc * rd2 + (ix_loc - 1) * rd + iz_loc;
+                            int n_idx = iy_loc * rd2 + iz_loc * rd + (ix_loc - 1);
                             corr_self[n_idx * spatial] += dot_norm * w_y0 * w_x1 * w_z0;
                         }
                         if (iy_loc < rd && ix_loc > 0 && iz_loc > 0) {
-                            int n_idx = iy_loc * rd2 + (ix_loc - 1) * rd + (iz_loc - 1);
+                            int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
                             corr_self[n_idx * spatial] += dot_norm * w_y0 * w_x1 * w_z1;
                         }
                         if (iy_loc > 0 && ix_loc < rd && iz_loc < rd) {
-                            int n_idx = (iy_loc - 1) * rd2 + ix_loc * rd + iz_loc;
+                            int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + ix_loc;
                             corr_self[n_idx * spatial] += dot_norm * w_y1 * w_x0 * w_z0;
                         }
                         if (iy_loc > 0 && ix_loc < rd && iz_loc > 0) {
-                            int n_idx = (iy_loc - 1) * rd2 + ix_loc * rd + (iz_loc - 1);
+                            int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + ix_loc;
                             corr_self[n_idx * spatial] += dot_norm * w_y1 * w_x0 * w_z1;
                         }
                         if (iy_loc > 0 && ix_loc > 0 && iz_loc < rd) {
-                            int n_idx = (iy_loc - 1) * rd2 + (ix_loc - 1) * rd + iz_loc;
+                            int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + (ix_loc - 1);
                             corr_self[n_idx * spatial] += dot_norm * w_y1 * w_x1 * w_z0;
                         }
                         if (iy_loc > 0 && ix_loc > 0 && iz_loc > 0) {
-                            int n_idx = (iy_loc - 1) * rd2 + (ix_loc - 1) * rd + (iz_loc - 1);
+                            int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
                             corr_self[n_idx * spatial] += dot_norm * w_y1 * w_x1 * w_z1;
                         }
                     }
