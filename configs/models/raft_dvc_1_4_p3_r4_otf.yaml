@@ -1,0 +1,46 @@
+# Model Configuration: RAFT-DVC, 1/4 encoder, on-the-fly correlation
+# Memory-efficient variant of raft_dvc_1_4_p3_r4.yaml.  Same architecture
+# (corr_levels=3 to match input=64 search reach) but corr_volume computed
+# on-the-fly per lookup instead of stored.
+#
+# At fm=16 the corr volume is only 34 MB/sample so OTF savings are modest
+# (~2-3 GB at batch=12).  Primary motivation is to enable batch=12 instead
+# of batch=8 -- attempting to escape the "predict zero" failure mode that
+# 1/4 batch=8 has shown.
+
+name: "RAFT-DVC-1/4-P3-R4-OTF"
+description: >
+  RAFT-DVC with 1/4 encoder and on-the-fly correlation.  Modest memory
+  savings at fm=16; main purpose is to allow batch=12 on 5090 32GB.
+
+architecture:
+  encoder_type: "1/4"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 3       # matches raft_dvc_1_4_p3_r4.yaml -- input=64 reach
+  corr_radius: 4
+
+  # On-the-fly correlation
+  corr_impl: "on_the_fly"
+  corr_chunk_size: 27        # 27 = 3^3 neighbors per chunk
+  corr_use_checkpoint: true  # recompute chunks in backward
+
+  use_sep_conv: true
+
+  iters: 12
+
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+  recommended_batch_size: 12
+  memory_usage_estimate: "~28 GB at batch=12 on 5090 32GB (vs ~30 GB standard)"
+  training_time_relative: 1.3  # ~30% slower than standard

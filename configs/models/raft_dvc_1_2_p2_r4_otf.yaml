@@ -1,0 +1,44 @@
+# Model Configuration: RAFT-DVC, 1/2 encoder, on-the-fly correlation
+# Memory-efficient variant of raft_dvc_1_2_p2_r4.yaml.  At fm=32 the corr
+# volume is 2.1 GB/sample -- standard CorrBlock pins batch=1 even on 32GB
+# GPUs.  OTF removes this bottleneck, enabling batch=8 (the unified batch
+# size for paper-1 v3 ablation).
+
+name: "RAFT-DVC-1/2-P2-R4-OTF"
+description: >
+  RAFT-DVC with 1/2 encoder and on-the-fly correlation.  Significant
+  memory savings at fm=32; enables batch=8 on 5090 (vs batch=1 standard).
+  This is the only viable config for the 1/2 case in paper-1 v3.
+
+architecture:
+  encoder_type: "1/2"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 2       # matches raft_dvc_1_2_p2_r4.yaml
+  corr_radius: 4
+
+  # On-the-fly correlation
+  corr_impl: "on_the_fly"
+  corr_chunk_size: 27
+  corr_use_checkpoint: true
+
+  use_sep_conv: true
+
+  iters: 12
+
+metadata:
+  downsample_factor: 2
+  feature_map_size: "H/2 x W/2 x D/2"
+  recommended_batch_size: 8
+  memory_usage_estimate: "~22-26 GB at batch=8 on 5090 32GB (vs ~22 GB at batch=1 standard)"
+  training_time_relative: 1.3  # ~30% slower than standard per step,
+                                # but batch=8 -> 8x fewer steps -> net ~6x faster
