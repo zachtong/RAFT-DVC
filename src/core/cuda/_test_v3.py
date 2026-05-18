@@ -18,7 +18,7 @@ import torch
 from src.core.corr import CorrBlock
 from src.core.corr_otf_cuda import (
     CorrBlockCUDA, CorrBlockCUDAv3, CorrBlockCUDAv4,
-    CorrBlockCUDAv5, CorrBlockCUDAv5b, _load_module,
+    CorrBlockCUDAv5, CorrBlockCUDAv5b, CorrBlockCUDAv6, _load_module,
 )
 
 
@@ -43,7 +43,7 @@ def _make_inputs(B=2, C=128, H=8, W=8, D=8, seed=42, max_flow=1.5):
 
 
 def test_correctness():
-    print("\n=== [correctness] v3/v4/v5/v5b vs v1 vs standard ===")
+    print("\n=== [correctness] v3/v4/v5/v5b/v6 vs v1 vs standard ===")
     for (B, C, H) in [(1, 32, 8), (2, 128, 8), (2, 128, 16), (1, 256, 16)]:
         fmap1, fmap2, coords = _make_inputs(B=B, C=C, H=H, W=H, D=H)
         for L in (2, 3):
@@ -54,11 +54,14 @@ def test_correctness():
             d_v4 = (CorrBlockCUDAv4(fmap1, fmap2, num_levels=L, radius=4)(coords) - out_std).abs().max().item()
             d_v5 = (CorrBlockCUDAv5(fmap1, fmap2, num_levels=L, radius=4)(coords) - out_std).abs().max().item()
             d_v5b = (CorrBlockCUDAv5b(fmap1, fmap2, num_levels=L, radius=4)(coords) - out_std).abs().max().item()
-            ok = lambda d: "P" if d < 1e-4 else "F"
+            d_v6 = (CorrBlockCUDAv6(fmap1, fmap2, num_levels=L, radius=4)(coords) - out_std).abs().max().item()
+            # v6 uses fp16 -- looser tolerance (5e-3 like the original alt_cuda_corr fp16 test)
+            ok = lambda d, tol=1e-4: "P" if d < tol else "F"
             print(
                 f"  B={B} C={C} H={H} L={L}  v1={d_v1:.1e}  "
                 f"v3={d_v3:.1e}[{ok(d_v3)}] v4={d_v4:.1e}[{ok(d_v4)}] "
-                f"v5={d_v5:.1e}[{ok(d_v5)}] v5b={d_v5b:.1e}[{ok(d_v5b)}]"
+                f"v5={d_v5:.1e}[{ok(d_v5)}] v5b={d_v5b:.1e}[{ok(d_v5b)}] "
+                f"v6={d_v6:.1e}[{ok(d_v6, 5e-3)}]"
             )
 
 
@@ -72,6 +75,7 @@ def bench(B, C, H, L=2, n_iters=12, n_warmup=3, n_runs=10):
         ("v4", CorrBlockCUDAv4),
         ("v5", CorrBlockCUDAv5),
         ("v5b", CorrBlockCUDAv5b),
+        ("v6", CorrBlockCUDAv6),
     ]:
         try:
             corr = ctor(fmap1, fmap2, num_levels=L, radius=4)
@@ -115,7 +119,7 @@ def benchmark():
         B, C, H = cfg
         cfg_str = f"B={B} C={C} fm={H}"
         results = bench(B, C, H, L=2)
-        for impl in ("standard", "v1", "v3", "v4", "v5", "v5b"):
+        for impl in ("standard", "v1", "v3", "v4", "v5", "v5b", "v6"):
             r = results.get(impl, "?")
             if isinstance(r, tuple):
                 ms, peak = r

@@ -32,6 +32,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 
 // We use `torch::` qualified APIs throughout this file (TORCH_CHECK already
 // works since c10/util/Exception.h provides it).  Map the few `torch::*`
@@ -44,6 +45,7 @@ namespace torch {
     using ::at::zeros;
     using ::at::zeros_like;
     constexpr auto kFloat32 = ::at::kFloat;
+    constexpr auto kHalf = ::at::kHalf;
 }
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
@@ -1470,6 +1472,177 @@ torch::Tensor corr_otf_forward_one_level_v5b(
 }
 
 
+// =============================================================================
+// V6: V2 trilinear sample kernel (fp16 output) + torch.bmm matmul path
+// =============================================================================
+// V5 is memory-bandwidth-bound (per v5b diagnosis).  Cannot go faster without
+// reducing memory traffic OR using higher-throughput compute (tensor cores).
+//
+// V6 strategy:
+//   1. CUDA kernel samples fmap2 trilinear-interpolated at all neighbor
+//      positions for a chunk of source voxels.  Output as fp16 (halves
+//      memory traffic vs fp32).
+//   2. PyTorch torch.matmul/bmm in fp16 to compute the per-source dot
+//      products.  cuBLAS may dispatch to tensor cores (if M >= 16) or
+//      to gemv-optimized scalar code.  Even without tensor cores, fp16
+//      memory bandwidth alone gives ~2x v5.
+//
+// Output shape matches v1/v3/v4/v5: (B, n_neighbors, H, W, D) fp32.
+
+__global__ void corr_otf_v6_sample_kernel(
+    const float* __restrict__ fmap2,     // (B, C, Hi, Wi, Di) fp32
+    const float* __restrict__ coords,    // (B, 3, H, W, D)   fp32
+    __half* __restrict__ sampled,        // (B, chunk_size, n_neighbors, C) fp16
+    int B, int C,
+    int H, int W, int D,
+    int Hi, int Wi, int Di,
+    int radius,
+    float scale,
+    int chunk_start,
+    int chunk_size,
+    int n_neighbors
+) {
+    int total = B * chunk_size * n_neighbors;
+    int idx = threadIdx.x + blockDim.x * blockIdx.x;
+    if (idx >= total) return;
+
+    int per_batch = chunk_size * n_neighbors;
+    int b = idx / per_batch;
+    int rem = idx % per_batch;
+    int chunk_idx = rem / n_neighbors;
+    int n = rem % n_neighbors;
+
+    int spatial = H * W * D;
+    int s = chunk_start + chunk_idx;
+    if (s >= spatial) return;
+
+    // Decode neighbor index n -> (idx_H, idx_D, idx_W) -- matches v1/v3/v4/v5
+    int span = 2 * radius + 1;
+    int idx_H = n / (span * span);
+    int rem_n = n % (span * span);
+    int idx_D = rem_n / span;
+    int idx_W = rem_n % span;
+    float d_H = (float)(idx_H - radius);
+    float d_D = (float)(idx_D - radius);
+    float d_W = (float)(idx_W - radius);
+
+    // Read coords (channel order H, D, W -- matches v1)
+    const float* coords_b = coords + b * 3 * spatial;
+    float c_H = coords_b[0 * spatial + s] * scale;
+    float c_D = coords_b[1 * spatial + s] * scale;
+    float c_W = coords_b[2 * spatial + s] * scale;
+    float t_H = c_H + d_H;
+    float t_D = c_D + d_D;
+    float t_W = c_W + d_W;
+
+    // Trilinear interp (validity-masked)
+    int y0 = (int)floorf(t_H);
+    int x0 = (int)floorf(t_W);
+    int z0 = (int)floorf(t_D);
+    int y1 = y0 + 1, x1 = x0 + 1, z1 = z0 + 1;
+    float fy = t_H - (float)y0;
+    float fx = t_W - (float)x0;
+    float fz = t_D - (float)z0;
+
+    float my0 = (y0 >= 0 && y0 < Hi) ? 1.f : 0.f;
+    float my1 = (y1 >= 0 && y1 < Hi) ? 1.f : 0.f;
+    float mx0 = (x0 >= 0 && x0 < Wi) ? 1.f : 0.f;
+    float mx1 = (x1 >= 0 && x1 < Wi) ? 1.f : 0.f;
+    float mz0 = (z0 >= 0 && z0 < Di) ? 1.f : 0.f;
+    float mz1 = (z1 >= 0 && z1 < Di) ? 1.f : 0.f;
+
+    int y0c = max(0, min(y0, Hi - 1));
+    int y1c = max(0, min(y1, Hi - 1));
+    int x0c = max(0, min(x0, Wi - 1));
+    int x1c = max(0, min(x1, Wi - 1));
+    int z0c = max(0, min(z0, Di - 1));
+    int z1c = max(0, min(z1, Di - 1));
+
+    float w000 = (1.f - fy) * (1.f - fx) * (1.f - fz) * my0 * mx0 * mz0;
+    float w001 = (1.f - fy) * (1.f - fx) *        fz  * my0 * mx0 * mz1;
+    float w010 = (1.f - fy) *        fx  * (1.f - fz) * my0 * mx1 * mz0;
+    float w011 = (1.f - fy) *        fx  *        fz  * my0 * mx1 * mz1;
+    float w100 =        fy  * (1.f - fx) * (1.f - fz) * my1 * mx0 * mz0;
+    float w101 =        fy  * (1.f - fx) *        fz  * my1 * mx0 * mz1;
+    float w110 =        fy  *        fx  * (1.f - fz) * my1 * mx1 * mz0;
+    float w111 =        fy  *        fx  *        fz  * my1 * mx1 * mz1;
+
+    const float* fmap2_b = fmap2 + b * C * Hi * Wi * Di;
+    int stride_h = Wi * Di;
+    int stride_w = Di;
+    int off000 = y0c * stride_h + x0c * stride_w + z0c;
+    int off001 = y0c * stride_h + x0c * stride_w + z1c;
+    int off010 = y0c * stride_h + x1c * stride_w + z0c;
+    int off011 = y0c * stride_h + x1c * stride_w + z1c;
+    int off100 = y1c * stride_h + x0c * stride_w + z0c;
+    int off101 = y1c * stride_h + x0c * stride_w + z1c;
+    int off110 = y1c * stride_h + x1c * stride_w + z0c;
+    int off111 = y1c * stride_h + x1c * stride_w + z1c;
+
+    long sampled_base = (long)b * chunk_size * n_neighbors * C
+                      + (long)chunk_idx * n_neighbors * C
+                      + (long)n * C;
+
+    int HiWiDi = Hi * Wi * Di;
+    for (int ch = 0; ch < C; ++ch) {
+        const float* base_ch = fmap2_b + ch * HiWiDi;
+        float val = w000 * base_ch[off000] + w001 * base_ch[off001]
+                  + w010 * base_ch[off010] + w011 * base_ch[off011]
+                  + w100 * base_ch[off100] + w101 * base_ch[off101]
+                  + w110 * base_ch[off110] + w111 * base_ch[off111];
+        sampled[sampled_base + ch] = __float2half(val);
+    }
+}
+
+
+torch::Tensor corr_otf_v6_sample(
+    torch::Tensor fmap2,
+    torch::Tensor coords,
+    int64_t radius,
+    double scale,
+    int64_t chunk_start,
+    int64_t chunk_size
+) {
+    CHECK_INPUT(fmap2); CHECK_FP32(fmap2);
+    CHECK_INPUT(coords); CHECK_FP32(coords);
+    TORCH_CHECK(fmap2.dim() == 5, "fmap2 must be (B,C,Hi,Wi,Di)");
+    TORCH_CHECK(coords.dim() == 5 && coords.size(1) == 3, "coords must be (B,3,H,W,D)");
+
+    int B  = (int)fmap2.size(0);
+    int C  = (int)fmap2.size(1);
+    int Hi = (int)fmap2.size(2);
+    int Wi = (int)fmap2.size(3);
+    int Di = (int)fmap2.size(4);
+    int H  = (int)coords.size(2);
+    int W  = (int)coords.size(3);
+    int D  = (int)coords.size(4);
+    int span = 2 * (int)radius + 1;
+    int n_neighbors = span * span * span;
+
+    auto sampled = torch::empty(
+        {B, (long)chunk_size, n_neighbors, C},
+        fmap2.options().dtype(torch::kHalf)
+    );
+
+    int total = B * (int)chunk_size * n_neighbors;
+    int threads = 256;
+    int n_blocks = (total + threads - 1) / threads;
+
+    corr_otf_v6_sample_kernel<<<n_blocks, threads, 0,
+                                 at::cuda::getCurrentCUDAStream()>>>(
+        fmap2.data_ptr<float>(),
+        coords.data_ptr<float>(),
+        reinterpret_cast<__half*>(sampled.data_ptr<at::Half>()),
+        B, C, H, W, D, Hi, Wi, Di,
+        (int)radius, (float)scale,
+        (int)chunk_start, (int)chunk_size,
+        n_neighbors
+    );
+    AT_CUDA_CHECK(cudaGetLastError());
+    return sampled;
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("forward_one_level",  &corr_otf_forward_one_level,
           "On-the-fly 3D correlation forward (single pyramid level, v1)");
@@ -1483,4 +1656,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "V5 cooperative-tiled forward with multi-warp + neighbor-group parallelism");
     m.def("forward_one_level_v5b", &corr_otf_forward_one_level_v5b,
           "V5b: V5 with per-warp f1 to eliminate cross-warp bank conflicts");
+    m.def("v6_sample", &corr_otf_v6_sample,
+          "V6 trilinear sample kernel (chunked, fp16 output); pair with torch.matmul");
 }
