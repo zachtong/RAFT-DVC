@@ -41,6 +41,7 @@
 namespace torch {
     using ::at::Tensor;
     using ::at::empty;
+    using ::at::zeros;
     using ::at::zeros_like;
     constexpr auto kFloat32 = ::at::kFloat;
 }
