@@ -82,10 +82,10 @@ class RAFTDVCConfig:
                 f"Invalid uncertainty_mode: {self.uncertainty_mode!r}. "
                 f"Must be one of: 'none', 'nll', 'mol'"
             )
-        if self.corr_impl not in ("standard", "on_the_fly", "cuda_otf", "cuda_otf_v3"):
+        if self.corr_impl not in ("standard", "on_the_fly", "cuda_otf", "cuda_otf_v3", "cuda_otf_v4"):
             raise ValueError(
                 f"Invalid corr_impl: {self.corr_impl!r}. "
-                f"Must be one of: 'standard', 'on_the_fly', 'cuda_otf', 'cuda_otf_v3'"
+                f"Must be one of: 'standard', 'on_the_fly', 'cuda_otf', 'cuda_otf_v3', 'cuda_otf_v4'"
             )
 
     @property
@@ -317,7 +317,15 @@ class RAFTDVC(nn.Module):
 
         # Build correlation block — standard precomputed, pure-PyTorch
         # on-the-fly, or CUDA on-the-fly (fastest with low memory).
-        if self.config.corr_impl == "cuda_otf_v3":
+        if self.config.corr_impl == "cuda_otf_v4":
+            from .corr_otf_cuda import CorrBlockCUDAv4
+            corr_fn = CorrBlockCUDAv4(
+                fmap0,
+                fmap1,
+                num_levels=self.config.corr_levels,
+                radius=self.config.corr_radius,
+            )
+        elif self.config.corr_impl == "cuda_otf_v3":
             from .corr_otf_cuda import CorrBlockCUDAv3
             corr_fn = CorrBlockCUDAv3(
                 fmap0,

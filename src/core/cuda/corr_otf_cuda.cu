@@ -783,11 +783,240 @@ torch::Tensor corr_otf_forward_one_level_v3(
 }
 
 
+// =============================================================================
+// V4: V3 + neighbor-group parallelism + atomicAdd scatter
+// =============================================================================
+// V3 was correct after the (H,D,W) scatter fix, but only ~3% SM occupancy
+// because we launched B * spatial/32 blocks with 32 threads each -- way too
+// few work units to saturate the 5090's 170 SMs.
+//
+// V4 fix: split the (iy_loc, ix_loc, iz_loc) iteration space across an
+// EXTRA grid dimension (gridDim.z = G groups).  Each block now handles
+// 32 source voxels x 1/G of the 1000 inner iterations.  Total blocks
+// multiplied by G -> better occupancy.
+//
+// Cost: different blocks may write to the same output position via the
+// 8-corner scatter, so we use atomicAdd.  Output is pre-zeroed by host
+// (torch::zeros), so atomics accumulate correctly from any initial state.
+//
+// Tuning param G (n_groups): launcher uses G=8 by default; bench-tuneable.
+// G=8 turns the 1024 block kernel (fm=32) into 8192 blocks, easily filling
+// the 5090's 170 SMs across multiple waves.
+
+__global__ void corr_otf_forward_kernel_v4(
+    const float* __restrict__ fmap1_cl,
+    const float* __restrict__ fmap2_cl,
+    const float* __restrict__ coords,
+    float* __restrict__ corr,
+    int B, int C,
+    int H, int W, int D,
+    int Hi, int Wi, int Di,
+    int radius,
+    float scale,
+    float norm
+) {
+    const int b = blockIdx.x;
+    const int block_offset = blockIdx.y * BLOCK_T;
+    const int group_id = blockIdx.z;
+    const int group_count = gridDim.z;
+    const int tid = threadIdx.x;
+    const int spatial = H * W * D;
+    const int spatial_i = Hi * Wi * Di;
+
+    const int rd = 2 * radius + 1;
+    const int rd2 = rd * rd;
+    const int n_neighbors = rd2 * rd;
+    const int rd_plus = rd + 1;
+    const int total_inner = rd_plus * rd_plus * rd_plus;
+    const int iter_per_group = (total_inner + group_count - 1) / group_count;
+    const int iter_start = group_id * iter_per_group;
+    const int iter_end = min(iter_start + iter_per_group, total_inner);
+    if (iter_start >= iter_end) return;
+
+    __shared__ float f1_smem[CHANNEL_STRIDE][BLOCK_T + 1];
+    __shared__ float f2_smem[CHANNEL_STRIDE][BLOCK_T + 1];
+    __shared__ float coords_y_smem[BLOCK_T];
+    __shared__ float coords_x_smem[BLOCK_T];
+    __shared__ float coords_z_smem[BLOCK_T];
+
+    const int s_self = block_offset + tid;
+    const bool valid_self = (s_self < spatial);
+    if (valid_self) {
+        coords_y_smem[tid] = coords[b * 3 * spatial + 0 * spatial + s_self] * scale;
+        coords_z_smem[tid] = coords[b * 3 * spatial + 1 * spatial + s_self] * scale;
+        coords_x_smem[tid] = coords[b * 3 * spatial + 2 * spatial + s_self] * scale;
+    } else {
+        coords_y_smem[tid] = 0;
+        coords_z_smem[tid] = 0;
+        coords_x_smem[tid] = 0;
+    }
+    __syncthreads();
+
+    // Output pre-zeroed by host (torch::zeros).  No init loop here.
+
+    const float fy_self = valid_self ? (coords_y_smem[tid] - floorf(coords_y_smem[tid])) : 0.f;
+    const float fx_self = valid_self ? (coords_x_smem[tid] - floorf(coords_x_smem[tid])) : 0.f;
+    const float fz_self = valid_self ? (coords_z_smem[tid] - floorf(coords_z_smem[tid])) : 0.f;
+    const float w_y0 = 1.f - fy_self, w_y1 = fy_self;
+    const float w_x0 = 1.f - fx_self, w_x1 = fx_self;
+    const float w_z0 = 1.f - fz_self, w_z1 = fz_self;
+
+    float* corr_self = valid_self
+        ? (corr + b * n_neighbors * spatial + s_self)
+        : nullptr;
+
+    for (int c0 = 0; c0 < C; c0 += CHANNEL_STRIDE) {
+        // Load f1 chunk (cooperative)
+        for (int k = 0; k < BLOCK_T; ++k) {
+            int s_k = block_offset + k;
+            float v = 0.f;
+            if (s_k < spatial && (c0 + tid) < C) {
+                v = fmap1_cl[(long)b * spatial * C + (long)s_k * C + (c0 + tid)];
+            }
+            f1_smem[tid][k] = v;
+        }
+        __syncthreads();
+
+        // Iterate only over this group's slice of (iy_loc, ix_loc, iz_loc)
+        for (int linear = iter_start; linear < iter_end; ++linear) {
+            int iy_loc = linear / (rd_plus * rd_plus);
+            int rem = linear % (rd_plus * rd_plus);
+            int ix_loc = rem / rd_plus;
+            int iz_loc = rem % rd_plus;
+
+            // Load f2 chunk for this (iy, ix, iz) across all 32 sources
+            for (int k = 0; k < BLOCK_T; ++k) {
+                int s_k = block_offset + k;
+                float v = 0.f;
+                if (s_k < spatial && (c0 + tid) < C) {
+                    int y_base = (int)floorf(coords_y_smem[k]);
+                    int x_base = (int)floorf(coords_x_smem[k]);
+                    int z_base = (int)floorf(coords_z_smem[k]);
+                    int y2 = y_base - radius + iy_loc;
+                    int x2 = x_base - radius + ix_loc;
+                    int z2 = z_base - radius + iz_loc;
+                    if (y2 >= 0 && y2 < Hi && x2 >= 0 && x2 < Wi
+                        && z2 >= 0 && z2 < Di) {
+                        long fmap2_idx =
+                            ((long)b * spatial_i + (long)y2 * Wi * Di
+                             + (long)x2 * Di + (long)z2) * C
+                            + (c0 + tid);
+                        v = fmap2_cl[fmap2_idx];
+                    }
+                }
+                f2_smem[tid][k] = v;
+            }
+            __syncthreads();
+
+            if (corr_self != nullptr) {
+                float dot = 0.f;
+                #pragma unroll
+                for (int k = 0; k < CHANNEL_STRIDE; ++k) {
+                    dot += f1_smem[k][tid] * f2_smem[k][tid];
+                }
+                float dot_norm = dot * norm;
+
+                // 8-corner trilinear scatter via atomicAdd.  Different blocks
+                // (different groups) may target the same (s, n_idx) so atomics
+                // are required for correctness.
+                if (iy_loc < rd && ix_loc < rd && iz_loc < rd) {
+                    int n_idx = iy_loc * rd2 + iz_loc * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x0 * w_z0);
+                }
+                if (iy_loc < rd && ix_loc < rd && iz_loc > 0) {
+                    int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x0 * w_z1);
+                }
+                if (iy_loc < rd && ix_loc > 0 && iz_loc < rd) {
+                    int n_idx = iy_loc * rd2 + iz_loc * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x1 * w_z0);
+                }
+                if (iy_loc < rd && ix_loc > 0 && iz_loc > 0) {
+                    int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x1 * w_z1);
+                }
+                if (iy_loc > 0 && ix_loc < rd && iz_loc < rd) {
+                    int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x0 * w_z0);
+                }
+                if (iy_loc > 0 && ix_loc < rd && iz_loc > 0) {
+                    int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x0 * w_z1);
+                }
+                if (iy_loc > 0 && ix_loc > 0 && iz_loc < rd) {
+                    int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x1 * w_z0);
+                }
+                if (iy_loc > 0 && ix_loc > 0 && iz_loc > 0) {
+                    int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x1 * w_z1);
+                }
+            }
+            __syncthreads();
+        }
+    }
+}
+
+
+torch::Tensor corr_otf_forward_one_level_v4(
+    torch::Tensor fmap1_cl,
+    torch::Tensor fmap2_cl,
+    torch::Tensor coords,
+    int64_t radius,
+    double scale,
+    int64_t n_groups
+) {
+    CHECK_INPUT(fmap1_cl); CHECK_FP32(fmap1_cl);
+    CHECK_INPUT(fmap2_cl); CHECK_FP32(fmap2_cl);
+    CHECK_INPUT(coords);   CHECK_FP32(coords);
+    TORCH_CHECK(fmap1_cl.dim() == 5, "fmap1_cl must be (B,H,W,D,C)");
+    TORCH_CHECK(fmap2_cl.dim() == 5, "fmap2_cl must be (B,Hi,Wi,Di,C)");
+    TORCH_CHECK(coords.dim() == 5 && coords.size(1) == 3, "coords must be (B,3,H,W,D)");
+    TORCH_CHECK(n_groups >= 1, "n_groups must be >= 1");
+
+    int B  = (int)fmap1_cl.size(0);
+    int H  = (int)fmap1_cl.size(1);
+    int W  = (int)fmap1_cl.size(2);
+    int D  = (int)fmap1_cl.size(3);
+    int C  = (int)fmap1_cl.size(4);
+    int Hi = (int)fmap2_cl.size(1);
+    int Wi = (int)fmap2_cl.size(2);
+    int Di = (int)fmap2_cl.size(3);
+    TORCH_CHECK(C == (int)fmap2_cl.size(4), "fmap1/fmap2 must have same C");
+    TORCH_CHECK(C % CHANNEL_STRIDE == 0, "C must be a multiple of 32 for v4");
+
+    int span = 2 * (int)radius + 1;
+    int n_neighbors = span * span * span;
+    float norm = 1.f / sqrtf((float)C);
+    int spatial = H * W * D;
+    int n_blocks_y = (spatial + BLOCK_T - 1) / BLOCK_T;
+
+    // Pre-zero output (atomicAdd accumulates from zero)
+    auto corr = torch::zeros({B, n_neighbors, H, W, D}, fmap1_cl.options());
+
+    dim3 grid(B, n_blocks_y, (int)n_groups);
+    dim3 block(BLOCK_T, 1, 1);
+
+    corr_otf_forward_kernel_v4<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        fmap1_cl.data_ptr<float>(),
+        fmap2_cl.data_ptr<float>(),
+        coords.data_ptr<float>(),
+        corr.data_ptr<float>(),
+        B, C, H, W, D, Hi, Wi, Di,
+        (int)radius, (float)scale, norm
+    );
+    AT_CUDA_CHECK(cudaGetLastError());
+    return corr;
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("forward_one_level",  &corr_otf_forward_one_level,
           "On-the-fly 3D correlation forward (single pyramid level, v1)");
     m.def("backward_one_level", &corr_otf_backward_one_level,
           "On-the-fly 3D correlation backward (single pyramid level, v1)");
     m.def("forward_one_level_v3", &corr_otf_forward_one_level_v3,
-          "V3 cooperative-tiled forward (channels-last fmaps, faster)");
+          "V3 cooperative-tiled forward (channels-last fmaps)");
+    m.def("forward_one_level_v4", &corr_otf_forward_one_level_v4,
+          "V4 cooperative-tiled forward with neighbor-group parallelism");
 }

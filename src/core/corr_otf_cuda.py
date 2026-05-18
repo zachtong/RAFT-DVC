@@ -182,6 +182,48 @@ def _corr_one_level_v3(fmap1, fmap2_i, coords, radius, scale):
 
 
 # -----------------------------------------------------------------------------
+# V4 autograd Function: v3 + neighbor-group parallelism + atomicAdd scatter
+# -----------------------------------------------------------------------------
+# V4 is v3's structure (channels-last cooperative tiling) plus an extra
+# gridDim.z dimension splitting the (iy, ix, iz) iteration space into G
+# groups.  This multiplies launched block count by G (default 8), letting
+# the kernel saturate the GPU's many SMs.  Scatter uses atomicAdd to handle
+# cross-block writes to the same output position.
+
+class _CorrOneLevelV4Fn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, fmap1, fmap2_i, coords, radius, scale, n_groups=8):
+        mod = _load_module()
+        f1 = fmap1.float().contiguous()
+        f2 = fmap2_i.float().contiguous()
+        c = coords.float().contiguous()
+        f1_cl = f1.permute(0, 2, 3, 4, 1).contiguous()
+        f2_cl = f2.permute(0, 2, 3, 4, 1).contiguous()
+        out = mod.forward_one_level_v4(
+            f1_cl, f2_cl, c, int(radius), float(scale), int(n_groups),
+        )
+        ctx.save_for_backward(f1, f2, c)
+        ctx.radius = int(radius)
+        ctx.scale = float(scale)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        # Use v1 backward as fallback (v4 backward TBD)
+        mod = _load_module()
+        f1, f2, c = ctx.saved_tensors
+        grad_out = grad_out.float().contiguous()
+        gf1, gf2, gc = mod.backward_one_level(
+            f1, f2, c, grad_out, ctx.radius, ctx.scale,
+        )
+        return gf1, gf2, gc, None, None, None
+
+
+def _corr_one_level_v4(fmap1, fmap2_i, coords, radius, scale, n_groups=8):
+    return _CorrOneLevelV4Fn.apply(fmap1, fmap2_i, coords, radius, scale, n_groups)
+
+
+# -----------------------------------------------------------------------------
 # Multi-level wrapper matching CorrBlock interface
 # -----------------------------------------------------------------------------
 
@@ -283,6 +325,65 @@ class CorrBlockCUDAv3:
             scale = 1.0 / (2 ** level)
             corr_l = _corr_one_level_v3(
                 self.fmap1, fmap2_i, coords, self.radius, scale,
+            )
+            parts.append(corr_l)
+        out = torch.cat(parts, dim=1)
+        return out.contiguous().float()
+
+
+class CorrBlockCUDAv4:
+    """V4 CUDA correlation block: cooperative tiling + neighbor-group parallelism.
+
+    Same forward output as v3 / v1 / standard.  Uses atomicAdd scatter so
+    extra gridDim.z dimension can split the inner loop across more blocks,
+    achieving high GPU occupancy.  Backward uses v1 kernel as fallback.
+
+    Args:
+        n_groups: number of neighbor-iteration groups (gridDim.z).  Default 8
+            balances atomic contention vs occupancy.  Tune via bench.
+    """
+
+    def __init__(
+        self,
+        fmap1: torch.Tensor,
+        fmap2: torch.Tensor,
+        num_levels: int = 4,
+        radius: int = 4,
+        n_groups: int = 8,
+    ) -> None:
+        if fmap1.shape != fmap2.shape:
+            raise ValueError(
+                f"fmap1 and fmap2 must match; got {tuple(fmap1.shape)} vs "
+                f"{tuple(fmap2.shape)}"
+            )
+        if fmap1.ndim != 5:
+            raise ValueError(f"expected 5D fmaps; got {fmap1.ndim}D")
+        if not (fmap1.is_cuda and fmap2.is_cuda):
+            raise RuntimeError("CorrBlockCUDAv4 requires CUDA tensors")
+        if fmap1.shape[1] % 32 != 0:
+            raise ValueError(
+                f"v4 requires C divisible by 32 (got C={fmap1.shape[1]})."
+            )
+
+        self.num_levels = num_levels
+        self.radius = radius
+        self.n_groups = n_groups
+        self.fmap1 = fmap1
+
+        self.fmap2_pyramid: List[torch.Tensor] = [fmap2]
+        for _ in range(num_levels - 1):
+            prev = self.fmap2_pyramid[-1]
+            self.fmap2_pyramid.append(F.avg_pool3d(prev, kernel_size=2, stride=2))
+
+    def __call__(self, coords: torch.Tensor) -> torch.Tensor:
+        if coords.ndim != 5 or coords.shape[1] != 3:
+            raise ValueError(f"coords must be (B,3,H,W,D); got {tuple(coords.shape)}")
+        parts = []
+        for level in range(self.num_levels):
+            fmap2_i = self.fmap2_pyramid[level]
+            scale = 1.0 / (2 ** level)
+            corr_l = _corr_one_level_v4(
+                self.fmap1, fmap2_i, coords, self.radius, scale, self.n_groups,
             )
             parts.append(corr_l)
         out = torch.cat(parts, dim=1)

@@ -16,7 +16,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import torch
 
 from src.core.corr import CorrBlock
-from src.core.corr_otf_cuda import CorrBlockCUDA, CorrBlockCUDAv3, _load_module
+from src.core.corr_otf_cuda import (
+    CorrBlockCUDA, CorrBlockCUDAv3, CorrBlockCUDAv4, _load_module,
+)
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else None
@@ -40,31 +42,39 @@ def _make_inputs(B=2, C=128, H=8, W=8, D=8, seed=42, max_flow=1.5):
 
 
 def test_correctness():
-    print("\n=== [correctness] v3 vs v1 vs standard CorrBlock ===")
+    print("\n=== [correctness] v3 / v4 vs v1 vs standard CorrBlock ===")
     for (B, C, H) in [(1, 32, 8), (2, 128, 8), (2, 128, 16), (1, 256, 16)]:
         fmap1, fmap2, coords = _make_inputs(B=B, C=C, H=H, W=H, D=H)
         for L in (2, 3):
             std = CorrBlock(fmap1, fmap2, num_levels=L, radius=4)
             v1 = CorrBlockCUDA(fmap1, fmap2, num_levels=L, radius=4)
             v3 = CorrBlockCUDAv3(fmap1, fmap2, num_levels=L, radius=4)
+            v4 = CorrBlockCUDAv4(fmap1, fmap2, num_levels=L, radius=4)
             out_std = std(coords)
             out_v1 = v1(coords)
             out_v3 = v3(coords)
+            out_v4 = v4(coords)
             d_v1_std = (out_v1 - out_std).abs().max().item()
             d_v3_std = (out_v3 - out_std).abs().max().item()
-            d_v3_v1 = (out_v3 - out_v1).abs().max().item()
-            ok = "PASS" if d_v3_std < 1e-4 else "FAIL"
+            d_v4_std = (out_v4 - out_std).abs().max().item()
+            ok3 = "P" if d_v3_std < 1e-4 else "F"
+            ok4 = "P" if d_v4_std < 1e-4 else "F"
             print(
                 f"  B={B} C={C} H={H} L={L}  "
-                f"shape={tuple(out_v3.shape)}  "
-                f"v1-std={d_v1_std:.2e}  v3-std={d_v3_std:.2e}  v3-v1={d_v3_v1:.2e}  {ok}"
+                f"v1-std={d_v1_std:.2e}  v3-std={d_v3_std:.2e}[{ok3}]  "
+                f"v4-std={d_v4_std:.2e}[{ok4}]"
             )
 
 
 def bench(B, C, H, L=2, n_iters=12, n_warmup=3, n_runs=10):
     fmap1, fmap2, coords = _make_inputs(B=B, C=C, H=H, W=H, D=H)
     results = {}
-    for name, ctor in [("standard", CorrBlock), ("v1", CorrBlockCUDA), ("v3", CorrBlockCUDAv3)]:
+    for name, ctor in [
+        ("standard", CorrBlock),
+        ("v1", CorrBlockCUDA),
+        ("v3", CorrBlockCUDAv3),
+        ("v4", CorrBlockCUDAv4),
+    ]:
         try:
             corr = ctor(fmap1, fmap2, num_levels=L, radius=4)
         except Exception as exc:
@@ -107,7 +117,7 @@ def benchmark():
         B, C, H = cfg
         cfg_str = f"B={B} C={C} fm={H}"
         results = bench(B, C, H, L=2)
-        for impl in ("standard", "v1", "v3"):
+        for impl in ("standard", "v1", "v3", "v4"):
             r = results.get(impl, "?")
             if isinstance(r, tuple):
                 ms, peak = r
