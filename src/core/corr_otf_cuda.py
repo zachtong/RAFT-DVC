@@ -88,10 +88,17 @@ def _load_module():
         _MODULE = cached
         return _MODULE
     from torch.utils.cpp_extension import load
+    # /Zc:preprocessor required by PyTorch 2.11+ headers (compiled_autograd.h
+    # uses conforming preprocessor syntax).  Without it MSVC's legacy
+    # preprocessor mis-parses `std::` qualified templates as ambiguous symbols.
     _MODULE = load(
         name="raft_dvc_corr_otf_cuda",
         sources=[str(_CUDA_SRC)],
-        extra_cuda_cflags=["-O2", "--ptxas-options=-v"],
+        extra_cflags=["/Zc:preprocessor"],
+        extra_cuda_cflags=[
+            "-O2", "--ptxas-options=-v",
+            "-Xcompiler", "/Zc:preprocessor",
+        ],
         verbose=True,
     )
     return _MODULE
