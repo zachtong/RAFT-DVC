@@ -265,6 +265,42 @@ def _corr_one_level_v5(fmap1, fmap2_i, coords, radius, scale, n_groups=4):
 
 
 # -----------------------------------------------------------------------------
+# V5b: V5 + per-warp f1 (no cross-warp shared-mem bank conflict)
+# -----------------------------------------------------------------------------
+
+class _CorrOneLevelV5bFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, fmap1, fmap2_i, coords, radius, scale, n_groups=4):
+        mod = _load_module()
+        f1 = fmap1.float().contiguous()
+        f2 = fmap2_i.float().contiguous()
+        c = coords.float().contiguous()
+        f1_cl = f1.permute(0, 2, 3, 4, 1).contiguous()
+        f2_cl = f2.permute(0, 2, 3, 4, 1).contiguous()
+        out = mod.forward_one_level_v5b(
+            f1_cl, f2_cl, c, int(radius), float(scale), int(n_groups),
+        )
+        ctx.save_for_backward(f1, f2, c)
+        ctx.radius = int(radius)
+        ctx.scale = float(scale)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        mod = _load_module()
+        f1, f2, c = ctx.saved_tensors
+        grad_out = grad_out.float().contiguous()
+        gf1, gf2, gc = mod.backward_one_level(
+            f1, f2, c, grad_out, ctx.radius, ctx.scale,
+        )
+        return gf1, gf2, gc, None, None, None
+
+
+def _corr_one_level_v5b(fmap1, fmap2_i, coords, radius, scale, n_groups=4):
+    return _CorrOneLevelV5bFn.apply(fmap1, fmap2_i, coords, radius, scale, n_groups)
+
+
+# -----------------------------------------------------------------------------
 # Multi-level wrapper matching CorrBlock interface
 # -----------------------------------------------------------------------------
 
@@ -424,6 +460,47 @@ class CorrBlockCUDAv4:
             fmap2_i = self.fmap2_pyramid[level]
             scale = 1.0 / (2 ** level)
             corr_l = _corr_one_level_v4(
+                self.fmap1, fmap2_i, coords, self.radius, scale, self.n_groups,
+            )
+            parts.append(corr_l)
+        out = torch.cat(parts, dim=1)
+        return out.contiguous().float()
+
+
+class CorrBlockCUDAv5b:
+    """V5b: V5 with per-warp f1 region to eliminate bank conflicts.
+    Same interface as v5; only the kernel differs."""
+
+    def __init__(
+        self,
+        fmap1: torch.Tensor,
+        fmap2: torch.Tensor,
+        num_levels: int = 4,
+        radius: int = 4,
+        n_groups: int = 4,
+    ) -> None:
+        if fmap1.shape != fmap2.shape:
+            raise ValueError(
+                f"fmap1 and fmap2 must match; got {tuple(fmap1.shape)} vs "
+                f"{tuple(fmap2.shape)}"
+            )
+        if fmap1.shape[1] % 32 != 0:
+            raise ValueError(f"v5b requires C % 32 == 0 (got {fmap1.shape[1]})")
+        self.num_levels = num_levels
+        self.radius = radius
+        self.n_groups = n_groups
+        self.fmap1 = fmap1
+        self.fmap2_pyramid: List[torch.Tensor] = [fmap2]
+        for _ in range(num_levels - 1):
+            prev = self.fmap2_pyramid[-1]
+            self.fmap2_pyramid.append(F.avg_pool3d(prev, kernel_size=2, stride=2))
+
+    def __call__(self, coords: torch.Tensor) -> torch.Tensor:
+        parts = []
+        for level in range(self.num_levels):
+            fmap2_i = self.fmap2_pyramid[level]
+            scale = 1.0 / (2 ** level)
+            corr_l = _corr_one_level_v5b(
                 self.fmap1, fmap2_i, coords, self.radius, scale, self.n_groups,
             )
             parts.append(corr_l)

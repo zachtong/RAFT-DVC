@@ -1249,6 +1249,227 @@ torch::Tensor corr_otf_forward_one_level_v5(
 }
 
 
+// =============================================================================
+// V5b: V5 + per-warp f1 (eliminate cross-warp shared-mem bank conflicts)
+// =============================================================================
+// V5 had ONE f1_smem region shared by all 4 warps.  When warps are out of
+// lockstep (different k values), 128 threads accessing 32 banks can cause
+// up to 4x bank conflict.  V5b gives each warp its own f1 region (one
+// 4-warp-redundant load per chunk, but no inter-warp conflict).
+
+__global__ void corr_otf_forward_kernel_v5b(
+    const float* __restrict__ fmap1_cl,
+    const float* __restrict__ fmap2_cl,
+    const float* __restrict__ coords,
+    float* __restrict__ corr,
+    int B, int C,
+    int H, int W, int D,
+    int Hi, int Wi, int Di,
+    int radius,
+    float scale,
+    float norm
+) {
+    const int b = blockIdx.x;
+    const int block_offset = blockIdx.y * BLOCK_T;
+    const int group_id = blockIdx.z;
+    const int group_count = gridDim.z;
+
+    const int tid = threadIdx.x;
+    const int warp_id = tid >> 5;
+    const int lane = tid & 31;
+
+    const int spatial = H * W * D;
+    const int spatial_i = Hi * Wi * Di;
+
+    const int rd = 2 * radius + 1;
+    const int rd2 = rd * rd;
+    const int n_neighbors = rd2 * rd;
+    const int rd_plus = rd + 1;
+    const int total_inner = rd_plus * rd_plus * rd_plus;
+    const int iter_per_group = (total_inner + group_count - 1) / group_count;
+    const int group_start = group_id * iter_per_group;
+    const int group_end = min(group_start + iter_per_group, total_inner);
+    if (group_start >= group_end) return;
+
+    const int iter_per_warp = (group_end - group_start + V5_NUM_WARPS - 1) / V5_NUM_WARPS;
+    const int warp_iter_start = group_start + warp_id * iter_per_warp;
+    const int warp_iter_end = min(warp_iter_start + iter_per_warp, group_end);
+
+    // Per-warp f1 AND f2 (no cross-warp shared regions)
+    __shared__ float f1_smem[V5_NUM_WARPS][CHANNEL_STRIDE][BLOCK_T + 1];
+    __shared__ float f2_smem[V5_NUM_WARPS][CHANNEL_STRIDE][BLOCK_T + 1];
+    __shared__ float coords_y_smem[BLOCK_T];
+    __shared__ float coords_x_smem[BLOCK_T];
+    __shared__ float coords_z_smem[BLOCK_T];
+
+    // Coords still shared across warps (read-only)
+    if (warp_id == 0) {
+        int s_w0 = block_offset + lane;
+        if (s_w0 < spatial) {
+            coords_y_smem[lane] = coords[b * 3 * spatial + 0 * spatial + s_w0] * scale;
+            coords_z_smem[lane] = coords[b * 3 * spatial + 1 * spatial + s_w0] * scale;
+            coords_x_smem[lane] = coords[b * 3 * spatial + 2 * spatial + s_w0] * scale;
+        } else {
+            coords_y_smem[lane] = 0.f;
+            coords_z_smem[lane] = 0.f;
+            coords_x_smem[lane] = 0.f;
+        }
+    }
+    __syncthreads();
+
+    const int s_self = block_offset + lane;
+    const bool valid_self = (s_self < spatial);
+    const float fy_self = valid_self ? (coords_y_smem[lane] - floorf(coords_y_smem[lane])) : 0.f;
+    const float fx_self = valid_self ? (coords_x_smem[lane] - floorf(coords_x_smem[lane])) : 0.f;
+    const float fz_self = valid_self ? (coords_z_smem[lane] - floorf(coords_z_smem[lane])) : 0.f;
+    const float w_y0 = 1.f - fy_self, w_y1 = fy_self;
+    const float w_x0 = 1.f - fx_self, w_x1 = fx_self;
+    const float w_z0 = 1.f - fz_self, w_z1 = fz_self;
+
+    float* corr_self = valid_self
+        ? (corr + b * n_neighbors * spatial + s_self)
+        : nullptr;
+
+    for (int c0 = 0; c0 < C; c0 += CHANNEL_STRIDE) {
+        // Each warp loads its OWN f1 copy (parallel, no contention)
+        for (int k = 0; k < BLOCK_T; ++k) {
+            int s_k = block_offset + k;
+            float v = 0.f;
+            if (s_k < spatial && (c0 + lane) < C) {
+                v = fmap1_cl[(long)b * spatial * C + (long)s_k * C + (c0 + lane)];
+            }
+            f1_smem[warp_id][lane][k] = v;
+        }
+        __syncwarp();
+
+        for (int linear = warp_iter_start; linear < warp_iter_end; ++linear) {
+            int iy_loc = linear / (rd_plus * rd_plus);
+            int rem = linear % (rd_plus * rd_plus);
+            int ix_loc = rem / rd_plus;
+            int iz_loc = rem % rd_plus;
+
+            for (int k = 0; k < BLOCK_T; ++k) {
+                int s_k = block_offset + k;
+                float v = 0.f;
+                if (s_k < spatial && (c0 + lane) < C) {
+                    int y_base = (int)floorf(coords_y_smem[k]);
+                    int x_base = (int)floorf(coords_x_smem[k]);
+                    int z_base = (int)floorf(coords_z_smem[k]);
+                    int y2 = y_base - radius + iy_loc;
+                    int x2 = x_base - radius + ix_loc;
+                    int z2 = z_base - radius + iz_loc;
+                    if (y2 >= 0 && y2 < Hi && x2 >= 0 && x2 < Wi
+                        && z2 >= 0 && z2 < Di) {
+                        long fmap2_idx =
+                            ((long)b * spatial_i + (long)y2 * Wi * Di
+                             + (long)x2 * Di + (long)z2) * C
+                            + (c0 + lane);
+                        v = fmap2_cl[fmap2_idx];
+                    }
+                }
+                f2_smem[warp_id][lane][k] = v;
+            }
+            __syncwarp();
+
+            if (corr_self != nullptr) {
+                float dot = 0.f;
+                #pragma unroll
+                for (int k = 0; k < CHANNEL_STRIDE; ++k) {
+                    // Both f1 and f2 from THIS warp's private region
+                    dot += f1_smem[warp_id][k][lane] * f2_smem[warp_id][k][lane];
+                }
+                float dot_norm = dot * norm;
+
+                if (iy_loc < rd && ix_loc < rd && iz_loc < rd) {
+                    int n_idx = iy_loc * rd2 + iz_loc * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x0 * w_z0);
+                }
+                if (iy_loc < rd && ix_loc < rd && iz_loc > 0) {
+                    int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x0 * w_z1);
+                }
+                if (iy_loc < rd && ix_loc > 0 && iz_loc < rd) {
+                    int n_idx = iy_loc * rd2 + iz_loc * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x1 * w_z0);
+                }
+                if (iy_loc < rd && ix_loc > 0 && iz_loc > 0) {
+                    int n_idx = iy_loc * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y0 * w_x1 * w_z1);
+                }
+                if (iy_loc > 0 && ix_loc < rd && iz_loc < rd) {
+                    int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x0 * w_z0);
+                }
+                if (iy_loc > 0 && ix_loc < rd && iz_loc > 0) {
+                    int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + ix_loc;
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x0 * w_z1);
+                }
+                if (iy_loc > 0 && ix_loc > 0 && iz_loc < rd) {
+                    int n_idx = (iy_loc - 1) * rd2 + iz_loc * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x1 * w_z0);
+                }
+                if (iy_loc > 0 && ix_loc > 0 && iz_loc > 0) {
+                    int n_idx = (iy_loc - 1) * rd2 + (iz_loc - 1) * rd + (ix_loc - 1);
+                    atomicAdd(&corr_self[n_idx * spatial], dot_norm * w_y1 * w_x1 * w_z1);
+                }
+            }
+            __syncwarp();
+        }
+    }
+}
+
+
+torch::Tensor corr_otf_forward_one_level_v5b(
+    torch::Tensor fmap1_cl,
+    torch::Tensor fmap2_cl,
+    torch::Tensor coords,
+    int64_t radius,
+    double scale,
+    int64_t n_groups
+) {
+    CHECK_INPUT(fmap1_cl); CHECK_FP32(fmap1_cl);
+    CHECK_INPUT(fmap2_cl); CHECK_FP32(fmap2_cl);
+    CHECK_INPUT(coords);   CHECK_FP32(coords);
+    TORCH_CHECK(fmap1_cl.dim() == 5, "fmap1_cl must be (B,H,W,D,C)");
+    TORCH_CHECK(fmap2_cl.dim() == 5, "fmap2_cl must be (B,Hi,Wi,Di,C)");
+    TORCH_CHECK(coords.dim() == 5 && coords.size(1) == 3, "coords must be (B,3,H,W,D)");
+    TORCH_CHECK(n_groups >= 1, "n_groups must be >= 1");
+
+    int B  = (int)fmap1_cl.size(0);
+    int H  = (int)fmap1_cl.size(1);
+    int W  = (int)fmap1_cl.size(2);
+    int D  = (int)fmap1_cl.size(3);
+    int C  = (int)fmap1_cl.size(4);
+    int Hi = (int)fmap2_cl.size(1);
+    int Wi = (int)fmap2_cl.size(2);
+    int Di = (int)fmap2_cl.size(3);
+    TORCH_CHECK(C == (int)fmap2_cl.size(4), "fmap1/fmap2 must have same C");
+    TORCH_CHECK(C % CHANNEL_STRIDE == 0, "C must be a multiple of 32 for v5b");
+
+    int span = 2 * (int)radius + 1;
+    int n_neighbors = span * span * span;
+    float norm = 1.f / sqrtf((float)C);
+    int spatial = H * W * D;
+    int n_blocks_y = (spatial + BLOCK_T - 1) / BLOCK_T;
+
+    auto corr = torch::zeros({B, n_neighbors, H, W, D}, fmap1_cl.options());
+
+    dim3 grid(B, n_blocks_y, (int)n_groups);
+    dim3 block(V5_NUM_WARPS * 32, 1, 1);
+
+    corr_otf_forward_kernel_v5b<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        fmap1_cl.data_ptr<float>(),
+        fmap2_cl.data_ptr<float>(),
+        coords.data_ptr<float>(),
+        corr.data_ptr<float>(),
+        B, C, H, W, D, Hi, Wi, Di,
+        (int)radius, (float)scale, norm
+    );
+    AT_CUDA_CHECK(cudaGetLastError());
+    return corr;
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("forward_one_level",  &corr_otf_forward_one_level,
           "On-the-fly 3D correlation forward (single pyramid level, v1)");
@@ -1260,4 +1481,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "V4 cooperative-tiled forward with neighbor-group parallelism");
     m.def("forward_one_level_v5", &corr_otf_forward_one_level_v5,
           "V5 cooperative-tiled forward with multi-warp + neighbor-group parallelism");
+    m.def("forward_one_level_v5b", &corr_otf_forward_one_level_v5b,
+          "V5b: V5 with per-warp f1 to eliminate cross-warp bank conflicts");
 }
