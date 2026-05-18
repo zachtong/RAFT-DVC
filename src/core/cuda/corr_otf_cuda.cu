@@ -18,10 +18,31 @@
  *             because trilinear sampling is differentiable w.r.t. coords).
  */
 
-#include <torch/extension.h>
+// Minimal include set -- avoid <torch/extension.h> (umbrella) because PyTorch
+// 2.11 dev's torch/csrc/dynamo/compiled_autograd.h fails with C2872 'std'
+// ambiguous under nvcc + MSVC + CUDA 13.1.  We only need:
+//   - at::Tensor & options
+//   - CUDA stream getter
+//   - pybind11 macros for the module entrypoint
+//   - TORCH_CHECK / AT_CUDA_CHECK macros
+#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+
+// We use `torch::` qualified APIs throughout this file (TORCH_CHECK already
+// works since c10/util/Exception.h provides it).  Map the few `torch::*`
+// type/factory references to their at:: equivalents so we don't need
+// torch/all.h.
+namespace torch {
+    using ::at::Tensor;
+    using ::at::empty;
+    using ::at::zeros_like;
+    using ::at::kFloat32;
+}
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIG(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
