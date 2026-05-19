@@ -1,0 +1,44 @@
+# Model Configuration: RAFT-DVC, 1/4 encoder, corr_levels=4, CUDA OTF v5
+#
+# Hypothesis test (2026-05-18): the prior 1/4 case dead-zero failure may
+# be caused by corr_levels=3 providing insufficient coarse-scale lookup
+# signal during early training.  1/8 case uses corr_levels=4 and trains
+# fine; 1/4 mirrors 1/8 here to test if pyramid depth is the cause.
+#
+# Max search range with L=4, r=4: 4 * 2^3 = 32 fm-voxels = 128 input voxels
+# (vs input size 64 -> 2x overcomplete coverage, matching 1/8 case's pattern).
+#
+# Everything else identical to raft_dvc_1_4_p3_r4_cuda_otf_v5.yaml.
+
+name: "RAFT-DVC-1/4-P4-R4-CUDA-OTF-V5"
+description: >
+  Hypothesis-test variant: 1/4 encoder with corr_levels=4 (matching 1/8)
+  to check if pyramid depth was the cause of dead-zero failure.
+
+architecture:
+  encoder_type: "1/4"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # KEY: corr_levels=4 (vs prior failed config's 3), matching 1/8 case
+  corr_levels: 4
+  corr_radius: 4
+
+  corr_impl: "cuda_otf_v5"
+
+  use_sep_conv: true
+  iters: 12
+
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+  recommended_batch_size: 16
+  hypothesis_test: "corr_levels 3 -> 4 for 1/4 case dead-zero diagnosis"
