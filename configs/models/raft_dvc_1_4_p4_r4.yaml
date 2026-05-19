@@ -1,0 +1,44 @@
+# Model Configuration: RAFT-DVC, 1/4 encoder, corr_levels=4 (hypothesis test)
+#
+# Hypothesis test (2026-05-18): is the prior 1/4 case dead-zero failure
+# caused by corr_levels=3 providing insufficient coarse-scale lookup signal?
+# 1/8 uses L=4 and trains; 1/4 used L=3 and failed.  This variant tests
+# whether matching L=4 to 1/8 rescues the 1/4 case.
+#
+# Uses STANDARD CorrBlock (not OTF) at batch=8 for fast iteration during
+# hypothesis testing.  After confirming the hypothesis, the full paper-1
+# 1/4 run can switch back to OTF v5 + batch=16 for ablation consistency.
+
+name: "RAFT-DVC-1/4-P4-R4"
+description: >
+  Hypothesis-test variant: 1/4 encoder with corr_levels=4 (matching 1/8)
+  + standard CorrBlock for fast iteration.
+
+architecture:
+  encoder_type: "1/4"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  # KEY: corr_levels=4 (vs prior failed config's 3)
+  corr_levels: 4
+  corr_radius: 4
+
+  # standard CorrBlock (no OTF) for fast iteration during hypothesis test
+  corr_impl: "standard"
+
+  use_sep_conv: true
+  iters: 12
+
+metadata:
+  downsample_factor: 4
+  feature_map_size: "H/4 x W/4 x D/4"
+  recommended_batch_size: 8
+  hypothesis_test: "corr_levels 3 -> 4 for 1/4 case dead-zero diagnosis"
