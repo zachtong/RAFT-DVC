@@ -273,6 +273,71 @@ def render_fmap_stats(pdf: PdfPages, fmap_1_8, fmap_1_4, sample_idx: int) -> Non
     plt.close(fig)
 
 
+def render_fmap1_vs_fmap2(
+    pdf: PdfPages,
+    fmap1: torch.Tensor,
+    fmap2: torch.Tensor,
+    label: str,
+    sample_idx: int,
+    n_channels: int = 6,
+) -> None:
+    """Side-by-side fmap1 (from I1) vs fmap2 (from I2) for visual similarity.
+
+    Healthy encoder: fmap1 and fmap2 look like spatially-shifted versions
+    of each other (consistent features detecting the same beads, displaced).
+    Failing encoder: fmap1 and fmap2 look unrelated -> no learnable correspondence.
+
+    Per channel, shows 3 columns: fmap1[ch], fmap2[ch], |fmap2 - fmap1|[ch].
+    """
+    f1_np = fmap1.squeeze(0).cpu().numpy()  # (C, H, W, D)
+    f2_np = fmap2.squeeze(0).cpu().numpy()
+    C, H, W, D = f1_np.shape
+    mid = D // 2
+
+    fig, axes = plt.subplots(n_channels, 3, figsize=(11, 3 * n_channels))
+    fig.suptitle(
+        f"{label} encoder: fmap1 (from I1) vs fmap2 (from I2)  -- sample_{sample_idx:05d}\n"
+        f"shape={f1_np.shape}  XY slice @ z={mid}.  Healthy: f1 and f2 look similar (spatially-shifted by flow).",
+        fontsize=11,
+    )
+    if n_channels == 1:
+        axes = axes.reshape(1, 3)
+
+    for ch in range(n_channels):
+        s1 = f1_np[ch, :, :, mid]
+        s2 = f2_np[ch, :, :, mid]
+        d = s2 - s1
+        # Use same vmin/vmax for fmap1 and fmap2 to make them visually comparable
+        vmax_f = max(abs(s1).max(), abs(s2).max()) or 1.0
+        vmax_d = max(abs(d).min(), abs(d).max()) or 1e-6
+
+        im = axes[ch, 0].imshow(s1, cmap="RdBu_r", origin="lower", vmin=-vmax_f, vmax=vmax_f)
+        axes[ch, 0].set_title(f"ch {ch}: fmap1  (std={s1.std():.3f})", fontsize=9)
+        axes[ch, 0].axis("off")
+        plt.colorbar(im, ax=axes[ch, 0], fraction=0.046)
+
+        im = axes[ch, 1].imshow(s2, cmap="RdBu_r", origin="lower", vmin=-vmax_f, vmax=vmax_f)
+        axes[ch, 1].set_title(f"ch {ch}: fmap2  (std={s2.std():.3f})", fontsize=9)
+        axes[ch, 1].axis("off")
+        plt.colorbar(im, ax=axes[ch, 1], fraction=0.046)
+
+        im = axes[ch, 2].imshow(d, cmap="PiYG", origin="lower", vmin=-vmax_d, vmax=vmax_d)
+        # Pearson correlation between fmap1 and fmap2 (this channel)
+        s1f, s2f = s1.ravel(), s2.ravel()
+        s1f = s1f - s1f.mean(); s2f = s2f - s2f.mean()
+        denom = (np.linalg.norm(s1f) * np.linalg.norm(s2f)) + 1e-8
+        corr = float((s1f * s2f).sum() / denom)
+        axes[ch, 2].set_title(
+            f"ch {ch}: fmap2 - fmap1\nPearson(f1, f2) = {corr:+.3f}", fontsize=9,
+        )
+        axes[ch, 2].axis("off")
+        plt.colorbar(im, ax=axes[ch, 2], fraction=0.046)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    pdf.savefig(fig, dpi=110)
+    plt.close(fig)
+
+
 def render_gradient_signal(
     pdf: PdfPages, fmap1_1_8, fmap2_1_8, fmap1_1_4, fmap2_1_4, flow, sample_idx,
 ) -> None:
@@ -296,7 +361,7 @@ def render_gradient_signal(
 
     fig, axes = plt.subplots(3, 2, figsize=(13, 14))
     fig.suptitle(
-        f"⭐ Gradient signal: corr_at_truth - corr_at_zero (sample_{sample_idx:05d})\n"
+        f"*** Gradient signal: corr_at_truth - corr_at_zero (sample_{sample_idx:05d})\n"
         f"random init encoders.  Positive mean => model can learn; ~zero => DEAD.",
         fontsize=12,
     )
@@ -418,10 +483,13 @@ def main() -> None:
             render_input(pdf, sample, idx)
             # Page 2: fmap statistics (side-by-side)
             render_fmap_stats(pdf, fmap1_1_8, fmap1_1_4, idx)
-            # Pages 3-4: fmap per-channel visualization
+            # Pages 3-4: fmap1 per-channel visualization
             render_fmap_channels(pdf, fmap1_1_8, "1/8", idx)
             render_fmap_channels(pdf, fmap1_1_4, "1/4", idx)
-            # Page 5: KEY -- gradient signal
+            # Pages 5-6: fmap1 vs fmap2 (the I1/I2 similarity diagnostic)
+            render_fmap1_vs_fmap2(pdf, fmap1_1_8, fmap2_1_8, "1/8", idx)
+            render_fmap1_vs_fmap2(pdf, fmap1_1_4, fmap2_1_4, "1/4", idx)
+            # Page 7: KEY -- gradient signal
             render_gradient_signal(
                 pdf, fmap1_1_8, fmap2_1_8, fmap1_1_4, fmap2_1_4,
                 sample["flow"], idx,
