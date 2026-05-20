@@ -16,10 +16,19 @@ REM   corr_impl: standard
 REM   epochs:  50 (smoke test, original ran 500)
 REM   seed:    42
 REM
-REM Pass criteria: val EPE < 1.5 by epoch 25 (original hit 0.43 at epoch 495).
-REM Fail criteria: val EPE stays > 2.5 -> codebase is broken, 1/4 isn't unique.
+REM Pass criteria: val EPE < 1.2 by epoch 100 (original hit 0.43 at epoch 495).
+REM Fail criteria: val EPE stays > 2.0 by epoch 100 -> codebase broken.
 REM
-REM Estimated wall-clock: ~10 min for 50 epochs (1/8 case is fast at fm=8).
+REM Note: 50 epoch was NOT enough -- LR schedule (OneCycleLR pct_start=0.05)
+REM gives only ~2.5 epoch warmup + 47.5 epoch cosine anneal at 50 epoch
+REM total.  Need 100-200 epoch for the model to actually escape init and
+REM converge meaningfully.  Increased to 200 epoch (~40 min on 5090).
+REM
+REM Resume note: OneCycleLR cannot be safely resumed beyond its original
+REM total_steps.  If you want a longer run, RESTART from scratch (this bat
+REM auto-removes any previous ckpt dir).
+REM
+REM Estimated wall-clock: ~40 min for 200 epochs (1/8 case is fast at fm=8).
 REM =============================================================================
 
 setlocal
@@ -45,7 +54,7 @@ python scripts\phase1\train_phase1.py ^
     --data-root    data_paper1_v2 ^
     --output-root  "%OUTPUT_ROOT%" ^
     --experiment-name %EXP_NAME% ^
-    --epochs 50 ^
+    --epochs 200 ^
     --batch-size 24 ^
     --max-lr 4.0e-4 ^
     --num-workers 8
@@ -58,8 +67,8 @@ if errorlevel 1 (
 echo ====================================================================
 echo Smoke test done.  Inspect val EPE history:
 echo   findstr "Validation" "%EXP_DIR%\training.log"
-echo Healthy:   val EPE drops below 1.5 by epoch 25
-echo Broken:    val EPE stays above 2.5 -> trainer/data broken (not 1/4 specific)
+echo Healthy:   val EPE drops below 1.2 by epoch 100 (toward ~0.5 by 200)
+echo Broken:    val EPE stays above 2.0 -> trainer/data broken (not 1/4 specific)
 echo ====================================================================
 
 endlocal
