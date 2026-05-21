@@ -1,0 +1,52 @@
+# =============================================================================
+# Phase-1 base config -- NO AUGMENTATION variant for diagnostic use
+# =============================================================================
+# Identical to _base.yaml except `augment_train: false`.  Used to test
+# whether random flips+rotations in Phase1NPZDataset._augment_pair are
+# what's preventing 1/8 case from escaping predict-zero attractor.
+#
+# Hypothesis: original v2 success was a brittle escape that depended on
+# the specific RNG sequence in the augmentation; current RNG sequence
+# happens to keep the model trapped.  Disabling augmentation should make
+# escape deterministic if this hypothesis is correct.
+# =============================================================================
+
+data:
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  augment_train: false        # <-- only change vs _base.yaml
+  augment_val: false
+  patch_size: null
+  include_metadata: false
+
+training:
+  epochs: 100
+  iters: 12
+  lr: 2.0e-4
+  weight_decay: 5.0e-5
+  scheduler_type: onecycle
+  max_lr: 2.0e-4
+  pct_start: 0.05
+  anneal_strategy: cos
+  div_factor: 25.0
+  final_div_factor: 1.0e+4
+  min_lr: 1.0e-6
+  base_lr: 2.0e-5
+  step_size_up: 500
+  step_size_down: 1500
+  gamma: 0.8
+  grad_clip: 1.0
+  mixed_precision: true
+  log_interval: 10
+  val_interval: 5
+  save_interval: 50
+  latest_interval: 10
+
+validation:
+  batch_size: 8
+  num_workers: 2
+
+run:
+  seed: 42
