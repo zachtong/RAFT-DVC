@@ -29,6 +29,7 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader
@@ -159,11 +160,24 @@ def _resolve_output_root(cli_value: Path | None) -> Path:
     return (_REPO_ROOT / "checkpoints").resolve()
 
 
+def _seed_worker(worker_id: int) -> None:
+    # PyTorch reseeds each worker's torch RNG per epoch via initial_seed(),
+    # but numpy/python random must be seeded explicitly.  Without this, the
+    # global np.random calls inside Phase1NPZDataset._augment_pair are
+    # nondeterministic across runs -- training dynamics become irreproducible,
+    # which is the root cause of the v2/v3 escape inconsistency.
+    import random as _py_random
+    worker_seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(worker_seed)
+    _py_random.seed(worker_seed)
+
+
 def _build_dataloaders(
     data_cfg: dict,
     data_root: Path,
     split_batch_size: tuple[int, int],
     num_workers: int,
+    generator: torch.Generator | None = None,
 ) -> tuple[DataLoader, DataLoader]:
     train_ds = Phase1NPZDataset(
         root_dir=str(data_root / "train"),
@@ -195,6 +209,8 @@ def _build_dataloaders(
         persistent_workers=persistent,
         drop_last=True,
         collate_fn=safe_phase1_collate,
+        worker_init_fn=_seed_worker,
+        generator=generator,
     )
     val_loader = DataLoader(
         val_ds,
@@ -205,6 +221,7 @@ def _build_dataloaders(
         persistent_workers=persistent,
         drop_last=False,
         collate_fn=safe_phase1_collate,
+        worker_init_fn=_seed_worker,
     )
     return train_loader, val_loader
 
@@ -297,13 +314,28 @@ def main() -> None:
     base_cfg = _load_yaml(args.base_config)
     model_yaml = _load_yaml(args.model_config)
 
-    # Seeding
+    # Seeding -- must cover ALL random sources used in the pipeline:
+    #   * torch (model init, dropout, etc.)
+    #   * numpy (Phase1NPZDataset._augment_pair uses np.random.{random,randint})
+    #   * python random (defensive; not currently used but cheap)
+    # NB: dataloader workers run in separate processes -- PyTorch reseeds
+    # their torch.Generator automatically each epoch, but NOT numpy/random.
+    # Pass a `worker_init_fn` to the DataLoader to reseed those per-worker.
     seed = (
         args.seed
         if args.seed is not None
         else int(base_cfg.get("run", {}).get("seed", 42))
     )
+    import random as _py_random
     torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    _py_random.seed(seed)
+
+    # Generator for DataLoader shuffling -- makes batch order reproducible
+    # across runs given the same seed.
+    dataloader_generator = torch.Generator()
+    dataloader_generator.manual_seed(seed)
 
     # Path resolution
     data_phase1_root = _resolve_data_root(args.data_root)
@@ -344,6 +376,7 @@ def main() -> None:
             data_root,
             split_batch_size=(bs_train, bs_val),
             num_workers=num_workers,
+            generator=dataloader_generator,
         )
 
     # Model
