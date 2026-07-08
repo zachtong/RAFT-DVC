@@ -211,12 +211,10 @@ class Trainer:
         total_loss = 0.0
         
         accum = self._accum
+        n_contributing = 0      # micro-batches whose loss entered total_loss
+        oom_dropped_groups = 0  # accumulation groups discarded on CUDA OOM
+        skip_group = False      # True -> discard the rest of a poisoned group
         for batch_idx, batch in enumerate(self.train_loader):
-            # Move data to device
-            vol0 = batch['vol0'].to(self.device)
-            vol1 = batch['vol1'].to(self.device)
-            gt_flow = batch['flow'].to(self.device)
-
             # Gradient accumulation: a "group" spans `accum` micro-batches and
             # produces ONE optimizer step.  zero_grad fires at the group start;
             # the optimizer/scaler step + grad-clip fire at the group end.  Each
@@ -229,50 +227,78 @@ class Trainer:
             is_group_end = ((batch_idx + 1) % accum == 0)
 
             if is_group_start:
+                skip_group = False
                 self.optimizer.zero_grad()
+            if skip_group:
+                continue
 
-            # `step_taken` tracks whether optimizer.step() actually ran this
-            # group -- AMP scaler can skip it on inf/NaN gradients, in which
-            # case we must NOT advance the LR scheduler (avoids the
-            # "lr_scheduler.step() before optimizer.step()" warning + drift).
-            if self.scaler is not None:
-                with torch.amp.autocast('cuda'):
+            # Move data to device
+            vol0 = batch['vol0'].to(self.device)
+            vol1 = batch['vol1'].to(self.device)
+            gt_flow = batch['flow'].to(self.device)
+
+            flow_preds = loss = None
+            try:
+                # `step_taken` tracks whether optimizer.step() actually ran this
+                # group -- AMP scaler can skip it on inf/NaN gradients, in which
+                # case we must NOT advance the LR scheduler (avoids the
+                # "lr_scheduler.step() before optimizer.step()" warning + drift).
+                if self.scaler is not None:
+                    with torch.amp.autocast('cuda'):
+                        flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
+                        loss = self.criterion(flow_preds, gt_flow)
+
+                    # Accumulate scaled grads.  The GradScaler scale is constant
+                    # within a group (only scaler.update() at group end changes it),
+                    # so accumulated grads share one scale and unscale_ is exact.
+                    self.scaler.scale(loss / accum).backward()
+                    if is_group_end:
+                        # Pre-step snapshot so we can detect a real step via scaler.
+                        pre_step_scale = self.scaler.get_scale()
+                        self.scaler.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config['grad_clip']
+                        )
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                        # scaler.update() decreases the scale on bad steps; equal
+                        # scale implies optimizer.step() executed normally.
+                        step_taken = self.scaler.get_scale() >= pre_step_scale
+                    else:
+                        step_taken = False
+                else:
                     flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
                     loss = self.criterion(flow_preds, gt_flow)
 
-                # Accumulate scaled grads.  The GradScaler scale is constant
-                # within a group (only scaler.update() at group end changes it),
-                # so accumulated grads share one scale and unscale_ is exact.
-                self.scaler.scale(loss / accum).backward()
-                if is_group_end:
-                    # Pre-step snapshot so we can detect a real step via scaler.
-                    pre_step_scale = self.scaler.get_scale()
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.config['grad_clip']
-                    )
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                    # scaler.update() decreases the scale on bad steps; equal
-                    # scale implies optimizer.step() executed normally.
-                    step_taken = self.scaler.get_scale() >= pre_step_scale
-                else:
-                    step_taken = False
-            else:
-                flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
-                loss = self.criterion(flow_preds, gt_flow)
-
-                (loss / accum).backward()
-                if is_group_end:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(),
-                        self.config['grad_clip']
-                    )
-                    self.optimizer.step()
-                    step_taken = True
-                else:
-                    step_taken = False
+                    (loss / accum).backward()
+                    if is_group_end:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config['grad_clip']
+                        )
+                        self.optimizer.step()
+                        step_taken = True
+                    else:
+                        step_taken = False
+            except torch.cuda.OutOfMemoryError:
+                # Transient VRAM pressure (busy WDDM desktop apps grabbing
+                # memory mid-run): drop this whole accumulation group -- a
+                # partially-backwarded group has poisoned gradients -- and keep
+                # training instead of killing a multi-day run.  Grads are zeroed
+                # again at the next group start; one fewer scheduler step is
+                # harmless (OneCycle just ends marginally earlier on its curve).
+                skip_group = True
+                oom_dropped_groups += 1
+                flow_preds = loss = None
+                self.optimizer.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                self.logger.warning(
+                    f"CUDA OOM at epoch {self.epoch} batch {batch_idx}: "
+                    f"dropped accumulation group "
+                    f"({oom_dropped_groups} dropped this epoch)"
+                )
+                continue
 
             # Step scheduler per iteration for cyclic / onecycle; cosine steps per epoch.
             if step_taken and self._sched_step_per == 'iter':
@@ -281,6 +307,7 @@ class Trainer:
             # Log the UNSCALED loss (not loss/accum) so epoch loss stays
             # comparable across runs with different accumulation factors.
             total_loss += loss.item()
+            n_contributing += 1
 
             # TensorBoard per-iter logging — keep LR only (needed to verify
             # OneCycleLR / CyclicLR shape).  Per-iter loss is dropped because
@@ -296,7 +323,14 @@ class Trainer:
                     f"Loss: {loss.item():.4f} LR: {lr:.6f}"
                 )
 
-        return total_loss / len(self.train_loader)
+        if oom_dropped_groups:
+            self.logger.warning(
+                f"Epoch {self.epoch}: {oom_dropped_groups} accumulation "
+                f"group(s) dropped due to CUDA OOM"
+            )
+        # Average over batches that actually contributed; identical to
+        # len(train_loader) when no group was dropped.
+        return total_loss / max(1, n_contributing)
     
     @torch.no_grad()
     def validate(self) -> float:
@@ -307,24 +341,39 @@ class Trainer:
         self.model.eval()
         total_loss = 0.0
         total_epe = 0.0
-        
+        n_ok = 0
+
         for batch in self.val_loader:
             vol0 = batch['vol0'].to(self.device)
             vol1 = batch['vol1'].to(self.device)
             gt_flow = batch['flow'].to(self.device)
-            
-            flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
-            loss = self.criterion(flow_preds, gt_flow)
-            
-            # Compute EPE for final prediction
-            final_flow = flow_preds[-1]
-            epe = torch.sqrt(torch.sum((final_flow - gt_flow) ** 2, dim=1)).mean()
-            
+
+            try:
+                flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
+                loss = self.criterion(flow_preds, gt_flow)
+
+                # Compute EPE for final prediction
+                final_flow = flow_preds[-1]
+                epe = torch.sqrt(torch.sum((final_flow - gt_flow) ** 2, dim=1)).mean()
+            except torch.cuda.OutOfMemoryError:
+                # Same transient-desktop-pressure hazard as train_epoch; skip
+                # the batch rather than kill the run mid-validation.
+                torch.cuda.empty_cache()
+                self.logger.warning("CUDA OOM during validation batch: skipped")
+                continue
+
             total_loss += loss.item()
             total_epe += epe.item()
-        
-        avg_loss = total_loss / len(self.val_loader)
-        avg_epe = total_epe / len(self.val_loader)
+            n_ok += 1
+
+        if n_ok == 0:
+            # Every val batch OOMed: report inf so this epoch can never be
+            # mistaken for a new best; training continues.
+            self.logger.warning("Validation aborted: all batches hit CUDA OOM")
+            return float('inf')
+
+        avg_loss = total_loss / n_ok
+        avg_epe = total_epe / n_ok
 
         self.logger.info(
             f"Validation - Loss: {avg_loss:.4f} EPE: {avg_epe:.4f}"
