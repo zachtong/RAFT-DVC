@@ -8,6 +8,7 @@ Based on VolRAFT (CVPR 2024 Workshop) with improvements for usability.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as _ckpt
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from dataclasses import dataclass, field
@@ -65,6 +66,18 @@ class RAFTDVCConfig:
     # Update block configuration
     use_sep_conv: bool = True
 
+    # Gradient-checkpoint the per-iteration update block to cut the O(iters)
+    # activation graph to one iteration's worth.  Lets the memory-heavy fm32
+    # (1/2 encoder) case use the fast standard CorrBlock instead of the slow
+    # on-the-fly path.  Default off (byte-identical forward; only affects backward).
+    checkpoint_updates: bool = False
+
+    # Gradient-checkpoint the correlation LOOKUP (grid_sample) each iteration, so
+    # its O(iters) grad_input buffers are recomputed in backward instead of stored.
+    # Together with checkpoint_updates this brings fm32 (1/2 @ input64) standard
+    # correlation to ~24 GB at batch 1 (vs OOM).  Default off.
+    checkpoint_corr: bool = False
+
     # Inference configuration
     iters: int = 12
 
@@ -115,6 +128,8 @@ class RAFTDVCConfig:
             'corr_chunk_size': self.corr_chunk_size,
             'corr_use_checkpoint': self.corr_use_checkpoint,
             'use_sep_conv': self.use_sep_conv,
+            'checkpoint_updates': self.checkpoint_updates,
+            'checkpoint_corr': self.checkpoint_corr,
             'iters': self.iters,
             'mixed_precision': self.mixed_precision,
             'uncertainty_mode': self.uncertainty_mode,
@@ -392,22 +407,43 @@ class RAFTDVC(nn.Module):
         for _ in range(iters):
             coords1 = coords1.detach()
 
-            # Lookup correlation
-            corr = corr_fn(coords1)
+            # Lookup correlation (optionally gradient-checkpointed so the
+            # per-iteration grid_sample backward buffers are not retained --
+            # required to fit fm32 standard correlation on a 32 GB GPU).
+            if (getattr(self.config, 'checkpoint_corr', False)
+                    and self.training and torch.is_grad_enabled()):
+                corr = _ckpt(corr_fn, coords1, use_reentrant=False)
+            else:
+                corr = corr_fn(coords1)
 
             # Current flow estimate
             flow = coords1 - coords0
 
-            # Update step
+            # Update step.  Optionally gradient-checkpoint the update block so the
+            # O(iters) activation graph collapses to one iteration's worth -- this
+            # lets the memory-heavy fm32 (1/2) case use the fast standard CorrBlock
+            # instead of the slow on-the-fly path.  Default off.
+            _do_ckpt = (getattr(self.config, 'checkpoint_updates', False)
+                        and self.training and torch.is_grad_enabled())
             if self._use_amp:
                 with torch.cuda.amp.autocast():
+                    if _do_ckpt:
+                        net, delta_flow, log_b = _ckpt(
+                            self.update_block, net, context, corr, flow,
+                            use_reentrant=False)
+                    else:
+                        net, delta_flow, log_b = self.update_block(
+                            net, context, corr, flow
+                        )
+            else:
+                if _do_ckpt:
+                    net, delta_flow, log_b = _ckpt(
+                        self.update_block, net, context, corr, flow,
+                        use_reentrant=False)
+                else:
                     net, delta_flow, log_b = self.update_block(
                         net, context, corr, flow
                     )
-            else:
-                net, delta_flow, log_b = self.update_block(
-                    net, context, corr, flow
-                )
 
             # Update coordinates
             coords1 = coords1 + delta_flow
@@ -487,8 +523,18 @@ class RAFTDVC(nn.Module):
             Tuple of (model, checkpoint_dict)
         """
         checkpoint = torch.load(path, map_location=device)
-        
-        config = RAFTDVCConfig.from_dict(checkpoint['config'])
+
+        # save_checkpoint writes the architecture under 'model_config'; very old
+        # checkpoints used 'config'.  Accept both -- loading with the WRONG key
+        # used to raise KeyError here, and silently mismatched configs are the
+        # bug class that once shipped a random network in the 2D GUI.
+        config_dict = checkpoint.get('model_config', checkpoint.get('config'))
+        if config_dict is None:
+            raise KeyError(
+                f"Checkpoint {path!r} has neither 'model_config' nor 'config'; "
+                f"available keys: {sorted(checkpoint.keys())}"
+            )
+        config = RAFTDVCConfig.from_dict(config_dict)
         model = cls(config)
         model.load_state_dict(checkpoint['model_state_dict'])
         

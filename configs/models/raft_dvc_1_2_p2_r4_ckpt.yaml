@@ -1,0 +1,36 @@
+# Model Configuration: RAFT-DVC 1/2 encoder, L=2, gradient-checkpointed for fm32.
+#
+# Identical architecture to raft_dvc_1_2_p2_r4.yaml, but with checkpoint_updates
+# and checkpoint_corr enabled so the fm32 standard correlation (1/2 @ input64)
+# fits in ~16.5 GB at batch 1 instead of OOMing.  Both flags only recompute in
+# backward -> numerically identical to the non-checkpointed model (verified:
+# grad rel-diff ~6e-5).  This is the arm that completes Axis-1 as a 3-point curve.
+
+name: "RAFT-DVC-1/2-P2-R4-CKPT"
+description: >
+  1/2 encoder, corr_levels=2, with gradient-checkpointed correlation lookups and
+  update block for memory-feasible fm32 training on a 32 GB GPU (batch 1).
+
+architecture:
+  encoder_type: "1/2"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 2
+  corr_radius: 4
+
+  use_sep_conv: true
+
+  # Memory checkpointing (fm32 feasibility; numerically identical)
+  checkpoint_updates: true
+  checkpoint_corr: true
+
+  iters: 12

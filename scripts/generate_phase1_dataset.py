@@ -382,8 +382,31 @@ def main():
              'Used for paper-1 architecture-ablation experiments where '
              'we fix the physical deformation regardless of encoder.',
     )
+    parser.add_argument(
+        '--radii',
+        type=_parse_sizes, default=None,
+        help='Override the bead radii (e.g. "8").  Default: 2,4,6.  Used for the '
+             'fm-constant ablation where radius scales with the downsample factor '
+             '(r2@size32 / r4@size64 / r8@size128 all give fm-radius 1).',
+    )
+    parser.add_argument(
+        '--density-per-1000',
+        type=float, default=None,
+        help='Override the per-1000-voxel density VALUE for every density name. '
+             'Use with --only-config to pin one config at a custom density so the '
+             'bead COUNT in the (constant) feature map matches across sizes.',
+    )
     parser.set_defaults(with_mixed=True, with_viz=True)
     args = parser.parse_args()
+
+    # fm-constant ablation overrides: swap the module-level radii/densities so the
+    # generation loops pick them up (kept global to avoid threading through every
+    # helper).  Defaults (None) reproduce the standard 9-config set exactly.
+    global RADII, DENSITIES
+    if args.radii is not None:
+        RADII = list(args.radii)
+    if args.density_per_1000 is not None:
+        DENSITIES = [(name, float(args.density_per_1000)) for name, _ in DENSITIES]
 
     # Parse --only-config into a set; auto-skip mixed when restricted.
     only_configs = None

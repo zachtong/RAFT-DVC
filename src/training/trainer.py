@@ -111,8 +111,17 @@ class Trainer:
         #   - cosine   : CosineAnnealingLR       (monotonic cooldown)
         # `step_per` records whether to call scheduler.step() per iter or per epoch.
         sched_type = self.config.get('scheduler_type', 'cyclic')
+        # Gradient accumulation: effective batch = (DataLoader batch) * grad_accum_steps.
+        # The LR scheduler must count REAL optimizer steps, not micro-batches, so
+        # `total_steps` divides by the accumulation factor.  Default 1 = no
+        # accumulation (byte-identical to the pre-accumulation behavior).
+        self._accum = max(1, int(self.config.get('grad_accum_steps', 1)))
         iters_per_epoch = max(1, len(self.train_loader))
-        total_steps = int(self.config['epochs']) * iters_per_epoch
+        optim_steps_per_epoch = iters_per_epoch // self._accum
+        assert optim_steps_per_epoch >= 1, (
+            f"grad_accum_steps ({self._accum}) exceeds batches/epoch ({iters_per_epoch})"
+        )
+        total_steps = int(self.config['epochs']) * optim_steps_per_epoch
 
         if sched_type == 'onecycle':
             self.scheduler = OneCycleLR(
@@ -201,53 +210,76 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         
+        accum = self._accum
         for batch_idx, batch in enumerate(self.train_loader):
             # Move data to device
             vol0 = batch['vol0'].to(self.device)
             vol1 = batch['vol1'].to(self.device)
             gt_flow = batch['flow'].to(self.device)
-            
-            # Forward pass
-            self.optimizer.zero_grad()
-            
+
+            # Gradient accumulation: a "group" spans `accum` micro-batches and
+            # produces ONE optimizer step.  zero_grad fires at the group start;
+            # the optimizer/scaler step + grad-clip fire at the group end.  Each
+            # micro-batch loss is divided by `accum` so the accumulated gradient
+            # equals the mean over the full effective batch -- exact because
+            # SequenceLoss is a grand mean over all voxels and drop_last=True
+            # keeps every micro-batch equal-sized (mean-of-means == grand mean).
+            # accum == 1 reproduces the per-batch path byte-for-byte.
+            is_group_start = (batch_idx % accum == 0)
+            is_group_end = ((batch_idx + 1) % accum == 0)
+
+            if is_group_start:
+                self.optimizer.zero_grad()
+
             # `step_taken` tracks whether optimizer.step() actually ran this
-            # iteration -- AMP scaler can skip it on inf/NaN gradients, in which
+            # group -- AMP scaler can skip it on inf/NaN gradients, in which
             # case we must NOT advance the LR scheduler (avoids the
             # "lr_scheduler.step() before optimizer.step()" warning + drift).
             if self.scaler is not None:
-                # Pre-step LR snapshot so we can detect a real step via scaler.
-                pre_step_scale = self.scaler.get_scale()
                 with torch.amp.autocast('cuda'):
                     flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
                     loss = self.criterion(flow_preds, gt_flow)
 
-                self.scaler.scale(loss).backward()
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config['grad_clip']
-                )
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                # scaler.update() decreases the scale on bad steps; equal scale
-                # implies optimizer.step() executed normally.
-                step_taken = self.scaler.get_scale() >= pre_step_scale
+                # Accumulate scaled grads.  The GradScaler scale is constant
+                # within a group (only scaler.update() at group end changes it),
+                # so accumulated grads share one scale and unscale_ is exact.
+                self.scaler.scale(loss / accum).backward()
+                if is_group_end:
+                    # Pre-step snapshot so we can detect a real step via scaler.
+                    pre_step_scale = self.scaler.get_scale()
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config['grad_clip']
+                    )
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    # scaler.update() decreases the scale on bad steps; equal
+                    # scale implies optimizer.step() executed normally.
+                    step_taken = self.scaler.get_scale() >= pre_step_scale
+                else:
+                    step_taken = False
             else:
                 flow_preds = self.model(vol0, vol1, iters=self.config['iters'])
                 loss = self.criterion(flow_preds, gt_flow)
 
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config['grad_clip']
-                )
-                self.optimizer.step()
-                step_taken = True
+                (loss / accum).backward()
+                if is_group_end:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config['grad_clip']
+                    )
+                    self.optimizer.step()
+                    step_taken = True
+                else:
+                    step_taken = False
 
             # Step scheduler per iteration for cyclic / onecycle; cosine steps per epoch.
             if step_taken and self._sched_step_per == 'iter':
                 self.scheduler.step()
             self.global_step += 1
+            # Log the UNSCALED loss (not loss/accum) so epoch loss stays
+            # comparable across runs with different accumulation factors.
             total_loss += loss.item()
 
             # TensorBoard per-iter logging — keep LR only (needed to verify
@@ -372,7 +404,14 @@ class Trainer:
 
             # Validation
             if self.val_loader is not None and epoch % self.config['val_interval'] == 0:
+                # Release the training cache so validation's (large, for fm32)
+                # correlation volume doesn't stack on the reserved training pool
+                # and OOM; release again afterwards before the next train epoch.
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 val_loss = self.validate()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 
                 # Save best model
                 if val_loss < self.best_val_loss:

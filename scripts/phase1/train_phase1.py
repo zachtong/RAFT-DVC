@@ -133,6 +133,44 @@ def parse_args() -> argparse.Namespace:
              "when scaling batch size from the _base.yaml default. "
              "Sqrt scaling rule: max_lr ~ 2e-4 * sqrt(batch/8).",
     )
+    parser.add_argument(
+        "--grad-accum-steps", type=int, default=1,
+        help="Micro-batches per optimizer step; effective batch = batch_size "
+             "* grad_accum_steps.  Default 1 (no accumulation).  Used to "
+             "equalize effective batch across encoders with different memory "
+             "footprints (clean-ablation control).",
+    )
+    parser.add_argument(
+        "--pct-start", type=float, default=None,
+        help="Override OneCycleLR pct_start (fraction of training spent ramping "
+             "LR up to max_lr).  Higher = longer warmup = wider window to escape "
+             "the predict-zero plateau (dead-zero fix).  Default None keeps the "
+             "_base.yaml value (0.05).",
+    )
+    parser.add_argument(
+        "--no-persistent-workers", action="store_true",
+        help="Disable DataLoader persistent_workers so workers respawn each "
+             "epoch and release accumulated host RAM.  Needed for large 128^3 "
+             "volumes where persistent workers gradually exhaust system memory.",
+    )
+    parser.add_argument(
+        "--no-pin-memory", action="store_true",
+        help="Disable DataLoader pin_memory (lowers host-RAM footprint for "
+             "large-volume datasets on memory-constrained machines).",
+    )
+    parser.add_argument(
+        "--latest-interval", type=int, default=None,
+        help="Save latest.pth every N epochs (default: _base.yaml value, 10). "
+             "Set 1 for multi-day runs so an interrupted run resumes with at "
+             "most one epoch lost.",
+    )
+    parser.add_argument(
+        "--val-batch-size", type=int, default=None,
+        help="Override the validation batch size (defaults to the train/base "
+             "batch size).  Needed for fm32 (1/2 @ input64): validation runs in "
+             "eval mode with no checkpointing, so a large val batch OOMs on the "
+             "big correlation volume even though batch-1 training fits.",
+    )
     return parser.parse_args()
 
 
@@ -292,6 +330,11 @@ def _build_trainer_config(base_cfg: dict, args: argparse.Namespace) -> dict:
         # div_factor scaling).  Keep them in lockstep.
         training["max_lr"] = float(args.max_lr)
         training["lr"] = float(args.max_lr)
+    training["grad_accum_steps"] = max(1, int(getattr(args, "grad_accum_steps", 1) or 1))
+    if getattr(args, "pct_start", None) is not None:
+        training["pct_start"] = float(args.pct_start)
+    if getattr(args, "latest_interval", None) is not None:
+        training["latest_interval"] = max(1, int(args.latest_interval))
     return training
 
 
@@ -343,8 +386,18 @@ def main() -> None:
     output_dir = output_root / "phase1" / args.experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Large-volume (128^3) host-RAM relief: optionally disable persistent workers
+    # (release worker RAM each epoch) and pinned memory.  Prevents the gradual
+    # MemoryError seen at fm16/size128 with 8 persistent workers around epoch ~45.
+    if getattr(args, "no_persistent_workers", False):
+        base_cfg["data"]["persistent_workers"] = False
+    if getattr(args, "no_pin_memory", False):
+        base_cfg["data"]["pin_memory"] = False
+
     # Dataloaders
     bs_train, bs_val = _resolve_batch_sizes(base_cfg, args.batch_size)
+    if getattr(args, "val_batch_size", None) is not None:
+        bs_val = int(args.val_batch_size)
     num_workers = _resolve_num_workers(base_cfg, args.num_workers)
 
     if args.otf:
@@ -432,4 +485,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Make a long detached run immune to console control signals (Ctrl+C /
+    # Ctrl+Break -- Windows forwards these on window-close, RDP-disconnect, and
+    # when a running scheduled task is deleted; one of these killed an earlier
+    # 1/2@64 run at step 30).  With FOR_DISABLE_CONSOLE_CTRL_HANDLER=1 (MKL) the
+    # process now survives session churn.  Stop it deliberately with `taskkill /F`.
+    import signal as _signal
+    for _s in ("SIGINT", "SIGBREAK"):
+        if hasattr(_signal, _s):
+            try:
+                _signal.signal(getattr(_signal, _s), _signal.SIG_IGN)
+            except Exception:
+                pass
     main()
