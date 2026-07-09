@@ -26,10 +26,14 @@ SCRIPT=scripts/phase1/slurm_1_2_at64_vista.sh
 cd "$WORK/projects/RAFT-DVC"
 mkdir -p logs
 
-jid=$(sbatch --parsable "$SCRIPT")
+# TACC's sbatch wrapper prints a "Welcome to Vista / Verifying..." banner to
+# stdout, which pollutes --parsable. Extract only the pure-numeric job-id line.
+submit() { sbatch --parsable "$@" "$SCRIPT" | grep -oE '^[0-9]+$' | tail -1; }
+
+jid=$(submit)
 echo "window 1: job $jid  (queued now)"
 for i in $(seq 2 "$N"); do
-    jid=$(sbatch --parsable --dependency=afterany:"$jid" "$SCRIPT")
+    jid=$(submit --dependency=afterany:"$jid")
     echo "window $i: job $jid  (starts after the previous window ends)"
 done
 
