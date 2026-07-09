@@ -29,7 +29,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:1
+# NOTE: no --gres on Vista; the `gh` partition allocates a whole GH200 node
+# (GPU included).  --gres=gpu:1 triggers "Invalid generic resource (gres)".
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=zachtong@utexas.edu

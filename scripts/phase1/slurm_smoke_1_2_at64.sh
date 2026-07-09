@@ -30,7 +30,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:1
+# NOTE: no --gres on Vista; the gh-dev partition allocates a whole GH200 node.
 #SBATCH --time=00:30:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=zachtong@utexas.edu
