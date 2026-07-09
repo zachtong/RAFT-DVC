@@ -58,6 +58,18 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 python -c "import torch;print('torch',torch.__version__,'| cuda',torch.cuda.is_available(),'|',torch.cuda.get_device_name(0))"
 [ -d "$DATA_ROOT/r4_medium_size64/train" ] || { echo "ERROR: data missing at $DATA_ROOT/r4_medium_size64 -- see runbook step 3 (regenerate on \$SCRATCH)"; exit 1; }
 
+# Completion guard: if latest.pth already reached the final epoch, this job (and
+# any trailing chained jobs) has nothing to do -- exit fast instead of spinning
+# up training to run zero epochs. Fails open (EP=0 -> runs) if the load errors.
+if [ -f "$EXP_DIR/latest.pth" ]; then
+    EP=$(python -c "import torch;print(int(torch.load('$EXP_DIR/latest.pth',map_location='cpu').get('epoch',0)))" 2>/dev/null || echo 0)
+    if [ "${EP:-0}" -ge 299 ]; then
+        echo "[done] latest.pth at epoch $EP (>=299) -- 300-epoch run complete, exiting."
+        exit 0
+    fi
+    echo "[guard] latest.pth at epoch $EP -- will resume."
+fi
+
 # Auto-resume: from a checkpoint copied off the 5090 on the first submit, then
 # from Vista's own latest.pth on every subsequent 24 h window.
 RESUME=""
