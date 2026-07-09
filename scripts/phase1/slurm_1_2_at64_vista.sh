@@ -24,7 +24,9 @@
 # =============================================================================
 #SBATCH --job-name=rdvc12at64
 #SBATCH --output=logs/rdvc_1_2_at64_%j.out
-#SBATCH --error=logs/rdvc_1_2_at64_%j.err
+# NOTE: no --error line on purpose -- SLURM then merges stderr (where Python's
+# logging writes the per-epoch INFO lines) into the .out file, so `tail -f .out`
+# shows the training progress, not just the startup banner.
 #SBATCH --partition=gh
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -66,7 +68,7 @@ else
     echo "[fresh]  no latest.pth found -- starting from epoch 0"
 fi
 
-srun python scripts/phase1/train_phase1.py \
+srun python -u scripts/phase1/train_phase1.py \
     --model-config configs/models/raft_dvc_1_2_p2_r4_ckpt.yaml \
     --data-config  r4_medium_size64 \
     --data-root    "$DATA_ROOT" \

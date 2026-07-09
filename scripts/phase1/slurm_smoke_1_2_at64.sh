@@ -25,7 +25,7 @@
 # =============================================================================
 #SBATCH --job-name=smk12at64
 #SBATCH --output=logs/smoke_1_2_at64_%j.out
-#SBATCH --error=logs/smoke_1_2_at64_%j.err
+# no --error: SLURM merges stderr (Python logging INFO lines) into the .out file
 #SBATCH --partition=gh-dev
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -54,7 +54,7 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 python -c "import torch;print('torch',torch.__version__,'| cuda',torch.cuda.is_available(),'|',torch.cuda.get_device_name(0))"
 [ -d "$DATA_ROOT/r4_medium_size64/train" ] || { echo "ERROR: data missing at $DATA_ROOT/r4_medium_size64 -- see runbook step 3"; exit 1; }
 
-srun python scripts/phase1/train_phase1.py \
+srun python -u scripts/phase1/train_phase1.py \
     --model-config configs/models/raft_dvc_1_2_p2_r4_ckpt.yaml \
     --data-config  r4_medium_size64 \
     --data-root    "$DATA_ROOT" \
