@@ -46,8 +46,8 @@ cd $WORK/projects/RAFT-DVC
 git fetch origin && git pull origin master
 git log --oneline -3          # expect the two training commits + the SLURM commit
 
-module load conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
+# Vista has NO `conda` module -- conda is auto-activated as (base) via .bashrc.
+# Just activate the env directly (base is already on PATH):
 conda activate $WORK/envs/raft-dvc
 python -c "import torch,scipy,numpy,yaml;print('torch',torch.__version__,'numpy',numpy.__version__)"
 python -c "import sys;sys.path.insert(0,'.');from src.core.raft_dvc import RAFTDVC;print('RAFTDVC import OK')"

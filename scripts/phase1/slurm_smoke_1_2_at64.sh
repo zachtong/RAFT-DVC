@@ -34,8 +34,9 @@
 
 set -euo pipefail
 
-module load conda
-source "$(conda info --base)/etc/profile.d/conda.sh"
+# Vista has no `conda` module; conda lives under $WORK/miniconda3 (set up in
+# .bashrc, which batch jobs do not source -- so source it by absolute path).
+source "$WORK/miniconda3/etc/profile.d/conda.sh"
 conda activate "$WORK/envs/raft-dvc"
 
 PROJECT_DIR="$WORK/projects/RAFT-DVC"
