@@ -6,15 +6,19 @@
 the 5090 can be freed for other ML work. Confirm the Vista run is healthy
 *before* stopping the local one.
 
-**Why this is clean:** gradient checkpointing (`checkpoint_updates` /
-`checkpoint_corr` in the local `*_ckpt` config) only changes how the *backward*
-pass trades compute for memory -- it does **not** change the model weights,
-optimizer state, or LR schedule. Vista has 96 GB HBM3, so the fm32 correlation
-fits **without** checkpointing at batch 2. Using batch 2 x accum 4 keeps the
-OneCycle `total_steps` identical to the local batch 1 x accum 8 run
-(300 * (2000/bs // accum) = 300 * 250 = **75000** either way), so the copied
-checkpoint's scheduler state resumes on the exact same LR curve. Net effect:
-same run, faster hardware, no checkpointing overhead.
+**Config choice (measured on an idev node 2026-07-09):** the GH200's GPU HBM is
+**~96 GB** (nvidia-smi: 97871 MiB; the "120GB" in the device name is nominal).
+- batch 2 NON-checkpointed OOMs (the 12-iter grid_sample backward buffers exceed
+  96 GB); batch 1 non-ckpt fits but underutilises the GPU (3.08 samp/s).
+- **CHECKPOINTED batch 4 x accum 2 fits (~66 GB) and is faster (4.0 samp/s,
+  ~8.3 min/epoch vs ~10.8)** -> this is the chosen config.
+
+This is the **same** `raft_dvc_1_2_p2_r4_ckpt.yaml` as the local run, just batch 4
+instead of batch 1, so weights/optimizer/scheduler transfer identically. Gradient
+checkpointing only changes the backward compute/memory tradeoff, not the math.
+batch 4 x accum 2 keeps OneCycle `total_steps` = 300 * (2000/bs // accum) =
+300 * 250 = **75000**, identical to the local batch 1 x accum 8 run, so the copied
+checkpoint's scheduler resumes on the exact same LR curve.
 
 ---
 
@@ -90,7 +94,11 @@ rsync -avz "$SRC/latest.pth" "$SRC/best_model.pth" "$DST/"
 > is at when you copy it is where Vista picks up. You can re-copy a fresher
 > `latest.pth` right before the real submit to hand off more progress.
 
-## Step 4 -- Vista: smoke test (gh-dev, 30 min, fresh, verifies batch 2 fits)
+## Step 4 -- Vista: smoke test (OPTIONAL -- already verified on idev 2026-07-09)
+
+The chosen config (ckpt batch 4 x accum 2) was already run on an idev GH200 node:
+~66 GB, 4.0 samp/s, no OOM. So this sbatch smoke is optional insurance. If you
+want it anyway (e.g. you skipped the idev check):
 
 ```bash
 cd $WORK/projects/RAFT-DVC
@@ -103,10 +111,11 @@ tail -f logs/smoke_1_2_at64_<jobid>.out
 **PASS:** banner `cuda True`, params printed, **no OutOfMemoryError**, loss
 lines finite, and a `Validation ... EPE:` line prints before the 30 min cap.
 
-**If it OOMs** (batch 2 fm32 > 96 GB -- unlikely, est. ~62 GB): edit BOTH
-`slurm_smoke_1_2_at64.sh` and `slurm_1_2_at64_vista.sh` to `--batch-size 1
---grad-accum-steps 8` (still non-checkpointed, ~31 GB, and `total_steps` still
-75000 so resume stays valid), then re-smoke.
+**If it OOMs** (only if the GPU is not clean -- a stale process still holding
+memory; on a fresh exclusive SLURM node this will not happen): fall back to
+`--model-config configs/models/raft_dvc_1_2_p2_r4.yaml --batch-size 1
+--grad-accum-steps 8` (non-checkpointed batch 1, ~65 GB; same eff batch 8 and
+total_steps 75000 so resume stays valid). Edit BOTH scripts.
 
 Clean up the throwaway smoke dir after:
 `rm -rf $SCRATCH/raft-dvc/training_runs/phase1/_smoke_1_2_at64`.
@@ -121,8 +130,9 @@ tail -f logs/rdvc_1_2_at64_<jobid>.out
 ```
 
 Expect the log to print `[resume] .../latest.pth` and continue from epoch ~53
-with val EPE already ~1.0 (not the dead-zero plateau). Per-epoch on H100
-(batch 2, non-checkpointed) should be well under the 5090's ~24 min.
+with val EPE already ~1.0 (not the dead-zero plateau). Per-epoch on the GH200
+(ckpt batch 4) is ~8.3 min (vs the 5090's ~24 min), so 300 epochs ~= 41 h
+(~2 x 24 h windows).
 
 ### Crossing the 24 h walltime cap
 
@@ -165,10 +175,10 @@ held-out test predicts it should land near **0.094 input-EPE** (fm-EPE ~0.047).
 
 ## Gotchas specific to this arm (carried from the 5090 session)
 
-- **Config choice:** use `raft_dvc_1_2_p2_r4.yaml` on Vista (standard corr, no
-  checkpointing) -- NOT the local `raft_dvc_1_2_p2_r4_ckpt.yaml`. Checkpointing
-  is a 32 GB-card workaround; on 96 GB it only slows you down. Resume across the
-  config swap is valid (weights/optimizer/scheduler are identical either way).
+- **Config choice:** use `raft_dvc_1_2_p2_r4_ckpt.yaml` at **batch 4 x accum 2**
+  (same config as local, just batch 4 vs 1). Measured on idev: batch 2 non-ckpt
+  OOMs the ~96 GB card, but ckpt batch 4 fits (~66 GB) and is ~25% faster than
+  non-ckpt batch 1. total_steps stays 75000, so resume is clean.
 - **Data determinism:** the val set must match the local val set for the EPE
   curve to be comparable -- Step 2's command guarantees it (same generator seeds).
 - **`gh` is 24 h, not unlimited:** the run needs several windows; rely on

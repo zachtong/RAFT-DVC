@@ -3,12 +3,18 @@
 # TACC Vista GH200 -- Paper-1 Axis-1 completing arm: 1/2 encoder @ input 64 (fm32)
 # =============================================================================
 # Continues the local RTX-5090 run (paper1_axis1_1_2_at64, seed 42, eff batch 8,
-# pct_start 0.2) on GH200.  Vista has 96 GB HBM3, so the fm32 correlation fits
-# WITHOUT gradient checkpointing at batch 2 -> plain config raft_dvc_1_2_p2_r4.yaml
-# (not the *_ckpt variant), batch 2 x accum 4 = eff 8.  This keeps OneCycle
-# total_steps identical to the local batch-1 x accum-8 run (2000/bs // accum *
-# epochs = 250 * 300 = 75000 either way), so a checkpoint copied from the 5090
-# resumes here with a valid scheduler state.
+# pct_start 0.2) on GH200.  The GH200's GPU HBM is ~96 GB (nvidia-smi: 97871 MiB;
+# the "120GB" in the device name is nominal).  Measured on an idev node 2026-07-09:
+#   - batch 2 NON-checkpointed  -> OOM (the 12-iter grid_sample backward buffers
+#     exceed 96 GB); batch 1 non-ckpt fits (~65 GB, 3.08 samp/s).
+#   - CHECKPOINTED batch 4 x accum 2 fits (~66 GB) AND is faster (4.0 samp/s,
+#     ~8.3 min/epoch vs ~10.8) -> use it.
+# Same config as the local run (raft_dvc_1_2_p2_r4_ckpt.yaml), just batch 4 vs 1,
+# so weights/optimizer/scheduler transfer identically.  batch 4 x accum 2 keeps
+# OneCycle total_steps = 300 * (2000/bs // accum) = 300 * 250 = 75000, identical
+# to the local batch 1 x accum 8 run, so the copied checkpoint resumes on the
+# exact same LR curve.  (The trainer's OOM-immunity is a backstop only; on a
+# clean exclusive SLURM GPU there should be zero drops.)
 #
 # 24 h walltime cap on `gh`; --latest-interval 1 + auto-resume make it safe to
 # resubmit across windows (or chain with --dependency=afterany:<jobid>).
@@ -60,12 +66,12 @@ else
 fi
 
 srun python scripts/phase1/train_phase1.py \
-    --model-config configs/models/raft_dvc_1_2_p2_r4.yaml \
+    --model-config configs/models/raft_dvc_1_2_p2_r4_ckpt.yaml \
     --data-config  r4_medium_size64 \
     --data-root    "$DATA_ROOT" \
     --output-root  "$OUT_ROOT" \
     --experiment-name "$EXP" \
-    --epochs 300 --batch-size 2 --grad-accum-steps 4 \
+    --epochs 300 --batch-size 4 --grad-accum-steps 2 \
     --max-lr 2.0e-4 --pct-start 0.2 \
     --num-workers 16 --latest-interval 1 --seed 42 $RESUME
 
