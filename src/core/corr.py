@@ -12,48 +12,56 @@ import numpy as np
 
 
 def bilinear_sampler_3d(
-    vol: torch.Tensor, 
-    coords: torch.Tensor
+    vol: torch.Tensor,
+    coords: torch.Tensor,
+    legacy_wd_swap: bool = False
 ) -> torch.Tensor:
     """
     Sample from 3D volume using trilinear interpolation.
-    
+
     Args:
         vol: Input volume. Shape: (B, C, H, W, D)
-        coords: Sampling coordinates in (x, y, z) format. Shape: (B, H', W', D', 3)
-    
+        coords: Sampling coordinates in (h, w, d) channel order,
+            matching coords_grid_3d. Shape: (B, H', W', D', 3)
+        legacy_wd_swap: Reproduce the historical behaviour that swapped the
+            W and D axes of the sampled volume (querying (h, w, d) returned
+            vol[h, d, w]). Checkpoints trained before 2026-07-12 are
+            co-adapted to that behaviour and MUST set this to True
+            (handled automatically via RAFTDVCConfig.corr_sampler_version).
+
     Returns:
         Sampled values. Shape: (B, C, H', W', D')
     """
     B, C, H, W, D = vol.shape
-    
-    # Normalize coordinates to [-1, 1] for grid_sample
-    # coords are in pixel coordinates, need to normalize
+
+    # Normalize pixel coordinates to [-1, 1] for grid_sample
     coords_normalized = coords.clone()
-    coords_normalized[..., 0] = 2.0 * coords_normalized[..., 0] / (H - 1) - 1.0  # y
-    coords_normalized[..., 1] = 2.0 * coords_normalized[..., 1] / (W - 1) - 1.0  # x
-    coords_normalized[..., 2] = 2.0 * coords_normalized[..., 2] / (D - 1) - 1.0  # z
-    
-    # grid_sample expects (B, D_out, H_out, W_out, 3) with (x, y, z) order for 3D
-    # Our coords are (B, H', W', D', 3) in (y, x, z) order
-    # Need to rearrange for grid_sample which uses (z, y, x) internally for 5D input
-    grid = coords_normalized[..., [2, 0, 1]]  # Reorder to (z, y, x)
-    
-    # Reshape for grid_sample: (B, C, D, H, W) input, (B, D_out, H_out, W_out, 3) grid
+    coords_normalized[..., 0] = 2.0 * coords_normalized[..., 0] / (H - 1) - 1.0  # h
+    coords_normalized[..., 1] = 2.0 * coords_normalized[..., 1] / (W - 1) - 1.0  # w
+    coords_normalized[..., 2] = 2.0 * coords_normalized[..., 2] / (D - 1) - 1.0  # d
+
+    # grid_sample 5-D convention: input (B, C, D_in, H_in, W_in), grid channels
+    # (x, y, z) index (W_in, H_in, D_in).  With vol permuted to (B, C, D, H, W)
+    # the correct channel order is (w, h, d) -> [1, 0, 2].
+    if legacy_wd_swap:
+        grid = coords_normalized[..., [2, 0, 1]]  # historical W<->D swap
+    else:
+        grid = coords_normalized[..., [1, 0, 2]]
+
     vol_permuted = vol.permute(0, 1, 4, 2, 3)  # (B, C, D, H, W)
     grid_permuted = grid.permute(0, 3, 1, 2, 4)  # (B, D', H', W', 3)
-    
+
     output = F.grid_sample(
-        vol_permuted, 
-        grid_permuted, 
-        mode='bilinear', 
+        vol_permuted,
+        grid_permuted,
+        mode='bilinear',
         padding_mode='zeros',
         align_corners=True
     )
-    
+
     # Permute back: (B, C, D, H, W) -> (B, C, H, W, D)
     output = output.permute(0, 1, 3, 4, 2)
-    
+
     return output
 
 
@@ -103,14 +111,16 @@ class CorrBlock:
     """
     
     def __init__(
-        self, 
-        fmap1: torch.Tensor, 
-        fmap2: torch.Tensor, 
-        num_levels: int = 4, 
-        radius: int = 4
+        self,
+        fmap1: torch.Tensor,
+        fmap2: torch.Tensor,
+        num_levels: int = 4,
+        radius: int = 4,
+        legacy_wd_swap: bool = False
     ):
         self.num_levels = num_levels
         self.radius = radius
+        self.legacy_wd_swap = legacy_wd_swap
         self.corr_pyramid: List[torch.Tensor] = []
         
         # Compute all-pairs correlation
@@ -186,7 +196,8 @@ class CorrBlock:
             coords_lvl = centroid_lvl + delta_lvl
             
             # Sample from correlation volume
-            corr_sampled = bilinear_sampler_3d(corr, coords_lvl)
+            corr_sampled = bilinear_sampler_3d(
+                corr, coords_lvl, legacy_wd_swap=self.legacy_wd_swap)
             corr_sampled = corr_sampled.reshape(batch, h1, w1, d1, -1)
             out_pyramid.append(corr_sampled)
         

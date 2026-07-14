@@ -60,10 +60,11 @@ def warp_volume_3d(
     flow_permuted = flow_normalized.permute(0, 2, 3, 4, 1)  # (B, H, W, D, 3)
     grid = grid + flow_permuted
     
-    # Rearrange for grid_sample (expects z, y, x order)
-    # grid_sample for 5D: grid is (B, D_out, H_out, W_out, 3) with (x, y, z) coords
-    # Our grid is (B, H, W, D, 3) in (y, x, z) order
-    grid_reordered = grid[..., [2, 0, 1]]  # Reorder to (z, y, x)
+    # grid_sample 5-D convention: with volume permuted to (B, C, D, H, W),
+    # grid channels (x, y, z) index (W, H, D) -> reorder (h, w, d) to (w, h, d).
+    # NOTE (2026-07-12): this previously used [2, 0, 1], which swapped the
+    # W and D axes of the warped volume (same bug as the correlation sampler).
+    grid_reordered = grid[..., [1, 0, 2]]
     grid_reordered = grid_reordered.permute(0, 3, 1, 2, 4)  # (B, D, H, W, 3)
     
     # Warp volume

@@ -63,6 +63,14 @@ class RAFTDVCConfig:
     corr_chunk_size: int = 27
     corr_use_checkpoint: bool = True
 
+    # Correlation-sampler coordinate convention:
+    #   2 -- fixed convention (correct: querying (h, w, d) samples vol[h, w, d])
+    #   1 -- legacy convention with a W<->D axis swap in bilinear_sampler_3d.
+    #        Checkpoints trained before 2026-07-12 are co-adapted to the swap
+    #        and only work with version 1 (load_checkpoint sets this
+    #        automatically when the saved config lacks the field).
+    corr_sampler_version: int = 2
+
     # Update block configuration
     use_sep_conv: bool = True
 
@@ -104,6 +112,18 @@ class RAFTDVCConfig:
                 f"Must be one of: 'standard', 'on_the_fly', 'cuda_otf', "
                 f"'cuda_otf_v3', 'cuda_otf_v4', 'cuda_otf_v5'"
             )
+        if self.corr_sampler_version not in (1, 2):
+            raise ValueError(
+                f"Invalid corr_sampler_version: {self.corr_sampler_version!r}. "
+                f"Must be 1 (legacy W<->D-swapped) or 2 (fixed)."
+            )
+        if self.corr_sampler_version == 2 and self.corr_impl != "standard":
+            raise ValueError(
+                f"corr_impl={self.corr_impl!r} has not been ported to the "
+                f"fixed sampler convention (corr_sampler_version=2). Use "
+                f"corr_impl='standard', or corr_sampler_version=1 for legacy "
+                f"checkpoints."
+            )
 
     @property
     def predict_uncertainty(self) -> bool:
@@ -127,6 +147,7 @@ class RAFTDVCConfig:
             'corr_impl': self.corr_impl,
             'corr_chunk_size': self.corr_chunk_size,
             'corr_use_checkpoint': self.corr_use_checkpoint,
+            'corr_sampler_version': self.corr_sampler_version,
             'use_sep_conv': self.use_sep_conv,
             'checkpoint_updates': self.checkpoint_updates,
             'checkpoint_corr': self.checkpoint_corr,
@@ -384,6 +405,7 @@ class RAFTDVC(nn.Module):
                 fmap1,
                 num_levels=self.config.corr_levels,
                 radius=self.config.corr_radius,
+                legacy_wd_swap=(self.config.corr_sampler_version == 1),
             )
         
         # Extract context features
@@ -534,6 +556,12 @@ class RAFTDVC(nn.Module):
                 f"Checkpoint {path!r} has neither 'model_config' nor 'config'; "
                 f"available keys: {sorted(checkpoint.keys())}"
             )
+        # Checkpoints saved before 2026-07-12 predate corr_sampler_version and
+        # were trained with the legacy W<->D-swapped sampler; they are
+        # co-adapted to it and must keep using it (version 1).  Only inject
+        # here, in the checkpoint path -- fresh configs default to version 2.
+        if 'corr_sampler_version' not in config_dict:
+            config_dict = dict(config_dict, corr_sampler_version=1)
         config = RAFTDVCConfig.from_dict(config_dict)
         model = cls(config)
         model.load_state_dict(checkpoint['model_state_dict'])

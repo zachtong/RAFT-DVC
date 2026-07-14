@@ -161,3 +161,16 @@ QUICK_START_CN.md
 
 # Local-only notes (TACC workflow, lessons learned, personal info)
 notes/
+
+# paper-1 benchmark artifacts
+traditional_DIC_codes/benchmark/data/
+traditional_DIC_codes/benchmark/logs/
+paper_1/main.pdf
+paper_1/*.aux
+paper_1/*.bbl
+paper_1/*.blg
+paper_1/*.log
+paper_1/*.out
+paper_1/main_article-class.bak.tex
+volraft_fixed/__pycache__/
+volraft_asreleased/__pycache__/
