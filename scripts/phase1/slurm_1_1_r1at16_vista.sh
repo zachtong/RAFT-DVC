@@ -37,7 +37,11 @@ cd "$PROJECT_DIR"
 mkdir -p logs "$OUT_ROOT/phase1"
 echo "=== Job $SLURM_JOB_ID on $(hostname) @ $(date) ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-[ -d "$DATA_ROOT/r1_medium_size16/train" ] || { echo "ERROR: data missing at $DATA_ROOT/r1_medium_size16"; exit 1; }
+if [ ! -d "$DATA_ROOT/r1_medium_size16/train" ]; then
+    echo "[gen] building r1_medium_size16 on \$SCRATCH (compute-node CPUs)..."
+    python scripts/paper1/gen_1_1_data.py --preset r1_16 --root "$DATA_ROOT"
+fi
+[ -d "$DATA_ROOT/r1_medium_size16/train" ] || { echo "ERROR: data gen failed at $DATA_ROOT/r1_medium_size16"; exit 1; }
 
 if [ -f "$EXP_DIR/latest.pth" ]; then
     EP=$(python -c "import torch;print(int(torch.load('$EXP_DIR/latest.pth',map_location='cpu').get('epoch',0)))" 2>/dev/null || echo 0)
