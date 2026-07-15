@@ -1,0 +1,46 @@
+# Model Configuration: RAFT-DVC 1/1 (full-res) encoder, L=2, gradient-checkpointed.
+#
+# Identical architecture to raft_dvc_1_1_p2_r4.yaml, but with checkpoint_updates
+# and checkpoint_corr enabled so the fm32 correlation (1/1 @ input 32 -> feature
+# 32^3, all-pairs 6D corr ~4.3 GB) fits comfortably on a GH200. Numerically
+# identical forward; only the backward recomputes activations to save memory.
+#
+# Used for ruler-law experiment D: f=1 on the SAME data as the 1/2 arm
+# (r2_medium_size32, input disp [1,2] fm == [1,2] raw at f=1). Predicts
+# raw-EPE ~ c ~ 0.022, testing whether f=1 reaches classical ICGN precision.
+
+name: "RAFT-DVC-1/1-P2-R4-ckpt"
+description: >
+  Full-resolution (no downsampling) RAFT-DVC, corr_levels=2, with
+  gradient-checkpointed correlation lookups and update block for fm32
+  feasibility. Matched architecture to the 1/2, 1/4, 1/8 arms (feature_dim 128,
+  corr_levels 2, corr_radius 4, 12 iters) -- only the encoder downsampling
+  differs (f=1).
+
+architecture:
+  encoder_type: "1/1"          # full resolution, no downsampling
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 2
+  corr_radius: 4
+
+  use_sep_conv: true
+  iters: 12
+
+  # Memory checkpointing (fm32 feasibility; numerically identical forward)
+  checkpoint_updates: true
+  checkpoint_corr: true
+
+metadata:
+  downsample_factor: 1
+  feature_map_size: "same as input (full resolution)"
+  note: "Experiment D of the ruler-law 4th-point study (f=1 on r2@32 data)."
