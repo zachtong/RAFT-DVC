@@ -28,8 +28,10 @@ sys.path.insert(0, str(REPO / "scripts" / "data_generation"))
 from modules.sample_generator import Phase1SampleGenerator  # noqa: E402
 
 PRESETS = {
-    "r1_16": dict(size=16, radius=1, density=38.4, disp=(1.0, 2.0)),
-    "r2_32": dict(size=32, radius=2, density=4.8,  disp=(2.0, 4.0)),
+    "r1_16":  dict(size=16,  radius=1, density=38.4,  disp=(1.0, 2.0)),
+    "r2_32":  dict(size=32,  radius=2, density=4.8,   disp=(2.0, 4.0)),
+    "r4_64":  dict(size=64,  radius=4, density=0.6,   disp=(4.0, 8.0)),
+    "r8_128": dict(size=128, radius=8, density=0.075, disp=(8.0, 16.0)),
 }
 FM = 16
 BASE_SEED = 771_000_000
