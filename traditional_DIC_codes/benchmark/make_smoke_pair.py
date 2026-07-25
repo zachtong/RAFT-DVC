@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Generate the smoke-test volume pair with a smooth sinusoidal displacement.
 
 Convention (same as the RAFT-DVC generator):  def[x] = ref[x + u(x)],

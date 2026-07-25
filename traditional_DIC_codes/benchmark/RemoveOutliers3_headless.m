@@ -1,4 +1,7 @@
 function [uvw,cc,RemoveOutliersList] = RemoveOutliers3_headless(uvw,cc,medianFilterThreshold)
+% RAFT-DVC: resolution-aware learned digital volume correlation.
+% Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+% Released under the MIT License; see LICENSE at the repository root.
 % REMOVEOUTLIERS3_HEADLESS  Non-interactive port of ALDVC/Global_DVC RemoveOutliers3.
 %
 %   [uvw,cc,RemoveOutliersList] = RemoveOutliers3_headless(uvw,cc,medianFilterThreshold)

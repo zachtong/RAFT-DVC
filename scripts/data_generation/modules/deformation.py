@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """
 Deformation field generators for synthetic DVC data.
 Implements 4 types: Affine, B-spline, Localized, and Combined.

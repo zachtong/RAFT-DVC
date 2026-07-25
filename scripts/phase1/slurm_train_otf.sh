@@ -69,7 +69,7 @@ MAX_LR="4.0e-4"             # sqrt scaling from baseline 2e-4 @ batch=8
 OTF_TRAIN_LENGTH=1200       # 50 iters/epoch at batch=24 (drop_last clean)
 OTF_VAL_LENGTH=96           # 4 batches at batch=24
 
-# ---- Storage layout (per CLAUDE.md TACC policy) ---------------------------
+# ---- Storage layout (TACC: code on $WORK, data and logs on $SCRATCH) ------
 # Training datasets are OTF -- NO disk reads needed.  Test sets only live on
 # $SCRATCH (uploaded separately for the eventual OOD pass).
 export DATA_PHASE1_ROOT="$SCRATCH/raft-dvc/data_phase1_test"

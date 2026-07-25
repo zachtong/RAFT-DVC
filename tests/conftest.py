@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Pytest configuration: ensure repo root is importable for `src.*` imports."""
 
 from __future__ import annotations

@@ -174,3 +174,20 @@ paper_1/*.out
 paper_1/main_article-class.bak.tex
 volraft_fixed/__pycache__/
 volraft_asreleased/__pycache__/
+
+# ---- Not part of the released artifact (kept locally) -----------------------
+# Manuscripts and paper-specific analysis: private working material.
+/paper_1/
+/paper_2/
+/paper_3/
+/scripts/paper1/
+# Pre-Phase-1 experimental snapshot, superseded by src/.
+/archive/
+# Internal planning, runbooks and handoff notes.
+/docs/plans/
+/docs/CODEBASE_GUIDE_CN.md
+/docs/HANDOFF_*.md
+# Local assistant/project instruction files.
+CLAUDE.md
+AGENTS.md
+.claude/

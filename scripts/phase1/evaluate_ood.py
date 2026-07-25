@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Phase-1 cross-config (OOD) evaluation wrapper.
 
 Loads a single checkpoint and evaluates it on N data configs (typically the

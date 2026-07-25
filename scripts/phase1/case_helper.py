@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Read a case_matrix.yaml entry and emit shell-evalable variables.
 
 Used by SLURM array job scripts to extract per-task case parameters.

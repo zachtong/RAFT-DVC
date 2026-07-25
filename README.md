@@ -1,107 +1,135 @@
-# RAFT-DVC: Deep Learning for Digital Volume Correlation
+# RAFT-DVC
 
-A PyTorch implementation of 3D Digital Volume Correlation (DVC) using the RAFT
-optical-flow architecture, with synthetic confocal-microscopy data generation
-and a TACC-ready training pipeline.
+Resolution-aware learned digital volume correlation for particle-labeled
+volumes. This repository contains the reference implementation, the three
+trained solvers, the synthetic-volume generator, and the headless drivers for
+the classical DVC baselines used in the accompanying paper.
 
-**Based on**: [VolRAFT (CVPR 2024)](https://openaccess.thecvf.com/content/CVPR2024W/CV4MS/html/Wong_VolRAFT_Volumetric_Optical_Flow_Network_for_Digital_Volume_Correlation_of_CVPRW_2024_paper.html)
+Zixiang (Zach) Tong, Lehu Bu, Jin Yang — University of Texas at Austin.
+Contact: <zachtong@utexas.edu>.
 
-**Authors**: Zach Tong, Prof. Jin Yang (UT Austin), Lehu Bu
+## What this is
 
----
+A 3D adaptation of the RAFT optical-flow architecture for DVC. The
+displacement field is solved on a coarse feature grid at 1/s of the input
+resolution and interpolated back to the voxel grid, so the downsampling factor
+`s` sets both the cost and the finest resolvable feature. Rather than ship one
+network, we train three *arms* at `s = 2, 4, 8`, each matched to a particle
+size and a displacement band, and give a rule for choosing between them.
 
-## 🧭 Project Status (2026-04-16)
+| arm | downsample `s` | particle radius | displacement band | training volume |
+|-----|----------------|-----------------|-------------------|-----------------|
+| s2  | 2              | 2 voxel         | 2–4 voxel         | 32³             |
+| s4  | 4              | 4 voxel         | 4–8 voxel         | 64³             |
+| s8  | 8              | 8 voxel         | 8–16 voxel        | 128³            |
 
-This repository is in the middle of a reorganization. The live code targets
-the **Phase-1 experimental campaign** for the RAFTcorr3D paper (40 training
-runs across 9 data configurations × 4 encoder variants).
+All three share one architecture (2 correlation levels, search radius 4, 12
+update iterations) and one optimizer schedule, so differences between them come
+from the input scale alone.
 
-Pre-2026-04-16 experimental artifacts have been moved to [`archive/`](archive/)
-as a read-only historical reference. See [`archive/README.md`](archive/README.md).
+## Choosing an arm
 
-## 📁 Project Structure
+Two constraints decide it.
 
-```
-RAFT-DVC/
-├── src/                          Core library (reusable)
-│   ├── core/                     RAFT-DVC network (encoder, correlation, update)
-│   ├── data/                     Dataset classes
-│   ├── training/                 Trainer, loss, augmentation strategies
-│   ├── utils/                    IO, memory, config loaders
-│   ├── visualization/            TensorBoard hooks, PyVista/matplotlib renders
-│   └── legacy_inference/         DEPRECATED for Phase-1/2; retained for Phase-3
-│
-├── configs/
-│   ├── models/                   Encoder variants (1/1, 1/2, 1/4, 1/8)
-│   ├── data_generation/          Synthetic-data YAMLs
-│   ├── phase1/                   Phase-1 training configs  (to be added)
-│   └── inference/                Visualization configs
-│
-├── scripts/
-│   ├── data_generation/          Synthetic-data modules
-│   ├── generate_phase1_dataset.py
-│   ├── preview_noise_model.py
-│   ├── preview_parameter_grid.py
-│   ├── slurm_train.sh            TACC Vista SLURM template
-│   ├── tacc_setup.sh             TACC first-time setup cheatsheet
-│   ├── upload_dataset_to_tacc.sh rsync local data_phase1/ to $SCRATCH
-│   └── phase1/                   train_phase1.py, evaluate_phase1.py
-│
-├── data_phase1/                  Local Phase-1 synthetic dataset (~60 GB, git-ignored)
-│                                 Layout: data_phase1/<config>/{train,val,test}/sample_*.npz
-├── reports/                      Auto-generated PDF test reports (git-ignored)
-├── docs/                         Architecture & codebase guide (Chinese + English)
-├── archive/                      Pre-Phase-1 experimental snapshot (read-only)
-└── CLAUDE.md                     Project rules for Claude Code
-```
+**Resolvability.** The feature grid must still see the particles, which
+requires the particle diameter to be at least about `s` voxel. This rules out
+the coarse arms on fine-grained volumes.
 
-## 📦 Setup
+**Reach.** The correlation pyramid searches `radius x 2^(levels-1) x s = 8s`
+voxel nominally; measured collapse points are near 6, 13, and 16 voxel for s2,
+s4, and s8. The displacement must stay inside that range.
 
-### Local (Windows / Linux)
+Deploy the smallest `s` that resolves the particles and still reaches the
+expected displacement. Within its band, an arm's error scales with the grid it
+solves on, roughly `0.017 x s` voxel; picking a coarser arm than necessary
+costs accuracy proportionally.
+
+## Setup
 
 ```bash
 conda create -n raft-dvc python=3.10
 conda activate raft-dvc
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
 
-### TACC Vista (GH200)
+Trained weights for the three arms are attached to the tagged release. Each is
+about 8 MB and carries its own `model_config`, so inference does not need a
+separate architecture file.
 
-See [`scripts/tacc_setup.sh`](scripts/tacc_setup.sh) — a copy-paste cheatsheet
-for first-time setup of `$WORK` / `$SCRATCH` directories, conda env, and shell
-aliases.
+## Reproducing the results
 
-## 🚀 Phase-1 Workflow (in progress)
+**Generate synthetic volumes.** The generator places Gaussian-rendered
+particles and applies a deformation drawn from the DIC shape-function classes
+(translation, affine, quadratic), then adds the imaging noise model:
 
-1. **Generate dataset locally** — `python scripts/generate_phase1_dataset.py`
-   produces 1000/100/100 train/val/test NPZ samples per configuration.
-2. **Upload dataset to TACC `$SCRATCH`** — see `scripts/upload_dataset_to_tacc.sh`
-   (to be added).
-3. **Train on Vista GH200** — `sbatch scripts/slurm_train.sh` (after editing
-   the script to point at `train_phase1.py`).
-4. **Evaluate** — `python scripts/phase1/evaluate_phase1.py --checkpoint ...`.
+```bash
+python scripts/generate_phase1_dataset.py --config configs/data_generation/<cfg>.yaml
+```
 
-## 📚 Documentation
+Volume size, particle radius and density, and the displacement band are all set
+in the YAML. The benchmark volumes in the paper are not redistributed because
+this generator reproduces them deterministically from the parameters tabulated
+in the paper's appendix.
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — core library design (authoritative)
-- [`docs/CODEBASE_GUIDE_CN.md`](docs/CODEBASE_GUIDE_CN.md) — 中文代码库指南
-- [`docs/plans/`](docs/plans/) — current experiment plans
-- [`CLAUDE.md`](CLAUDE.md) — project conventions (language policy, testing policy)
-- [`archive/`](archive/) — pre-Phase-1 experimental docs and configs
+**Train.**
 
-## 📖 Citation
+```bash
+python scripts/phase1/train_phase1.py --model-config configs/models/raft_dvc_1_4_p2_r4.yaml ...
+```
+
+`scripts/phase1/slurm_*.sh` are the SLURM templates used on TACC Vista.
+
+**Evaluate.**
+
+```bash
+python scripts/phase1/evaluate_phase1.py --checkpoint <arm>.pth --data <split>
+```
+
+**Classical baselines.** `traditional_DIC_codes/benchmark/` holds
+non-interactive MATLAB drivers for local subset DVC, ALDVC, and finite-element
+global DVC, plus the `.npz` to `.mat` converter. Every solver parameter used in
+the paper is tabulated there and in the paper's appendix. `AXIS_CONVENTION.md`
+documents the index mapping between the Python and MATLAB sides, which is worth
+reading before comparing fields.
+
+## The correlation-sampler test
+
+`tests/test_corr_sampler.py` is the impulse test discussed in the paper. It
+places a single non-zero voxel in the correlation volume and checks that the
+sampler reads it back at the queried location. A defect that transposes two
+axes passes ordinary shape checks and still trains, but shifts the correlation
+peak with position; the test fails immediately on that defect. If you port RAFT
+to 3D, run this first.
+
+```bash
+pytest tests/test_corr_sampler.py -v
+```
+
+## VolRAFT comparison
+
+`volraft_asreleased/` and `volraft_fixed/` are ports of
+[VolRAFT](https://github.com/hereon-mbs/VolRAFT) used for the architecture
+comparison in the paper: the first reproduces the upstream sampler behaviour,
+the second applies the axis-order correction. Both are derived work under the
+upstream MIT license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Citation
 
 ```bibtex
-@inproceedings{wong2024volraft,
-  title={VolRAFT: Volumetric Optical Flow Network for Digital Volume Correlation},
-  author={Wong, Chun Yin and Schanz, Daniel and Schr\"oder, Andreas and Geisler, Reinhard},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)},
-  year={2024},
-  pages={3621--3630}
+@article{tong2026raftdvc,
+  author  = {Tong, Zixiang and Bu, Lehu and Yang, Jin},
+  title   = {{RAFT-DVC}: A resolution-aware framework for learned digital
+             volume correlation in particle-labeled volumes},
+  journal = {Acta Mechanica Sinica},
+  year    = {2026}
 }
 ```
 
-## 📄 License
+The real confocal indentation volume used for validation comes from the DVC
+Challenge 2.0 dataset (doi:10.21203/rs.3.rs-9683321/v1).
 
-MIT — see [LICENSE](LICENSE).
+## License
+
+MIT, see [LICENSE](LICENSE). Third-party components and their licenses are
+listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

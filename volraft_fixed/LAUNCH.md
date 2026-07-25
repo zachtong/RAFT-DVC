@@ -41,7 +41,7 @@ the structured `training.log` (plus `latest.pth`, `best_model.pth`,
 `checkpoint_epoch_*.pth`, TensorBoard `logs/`, `run_config.yaml`) goes to
 `C:\Zixiang_local_data\raft-dvc\paper1\phase1\volraft_fixed_r4md64\`.
 
-### Detached long run via Task Scheduler (survives Claude/RDP session churn)
+### Detached long run via Task Scheduler (survives interactive-session churn)
 
 ```bat
 schtasks /Create /TN "volraft_fixed_r4md64" /SC ONCE /ST 10:05 /F ^

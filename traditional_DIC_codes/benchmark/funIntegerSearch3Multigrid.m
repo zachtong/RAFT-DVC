@@ -1,9 +1,8 @@
-function [xyz,uvw,cc] = funIntegerSearch3Mg(Img,gridRange,winsize,winstepsize,fftmethod)
-% RAFT-DVC: resolution-aware learned digital volume correlation.
-% Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
-% Released under the MIT License; see LICENSE at the repository root.
+function [xyz,uvw,cc] = funIntegerSearch3Multigrid(Img,gridRange,winsize,winstepsize,fftMethod)
 
-MaxVoxelNum = 100^3; MinSearchWS = 30;
+maxVoxelNum = 100^3; minSearchWindowSize = 30;
+%% [BENCHMARK SHADOW COPY] of ALDVC\func\funIntegerSearch3Multigrid.m
+%% Change: waitbar calls removed (zero numerical impact). Algorithm unchanged.
 
 % [xyz,uvw,Phi] = funIntegerSearch3(Img,tempSizeOfSearchRegion,gridRange,winsize,winstepsize,method)
 % is the main function that loads 3D volumetric images
@@ -51,7 +50,7 @@ MaxVoxelNum = 100^3; MinSearchWS = 30;
  
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-switch fftmethod
+switch fftMethod
     
     case {'xcorr','phasecorr'}
         
@@ -199,7 +198,7 @@ xtemp = ck1temp; ytemp = ck1temp; ztemp = ck1temp;
 % ClusterNo = input(prompt);
 % parpool(ClusterNo);
 % ------ Choose local fft solver ------
-switch fftmethod
+switch fftMethod
     %% --------------------------------------------------------------------------
     case {'xcorr','phasecorr'}
         % hbar = parfor_progressbar(temparrayLength,'Please wait for integer search!');
@@ -214,11 +213,11 @@ switch fftmethod
             
             D = Img2Partemp(ii:ii+winsize(1), jj:jj+winsize(2), kk:kk+winsize(3));
             C = MTF.*C; D = MTF.*D;
-            if strcmp(fftmethod,'xcorr')
+            if strcmp(fftMethod,'xcorr')
                 A = xCorr3(C,D,(winsize+[1,1,1]));
                 %close all
                 %figure,imagesc3D(A);
-            elseif strcmp(fftmethod,'phasecorr')
+            elseif strcmp(fftMethod,'phasecorr')
                 A = phaseCorr3(C,D,(winsize+[1,1,1]));
             end
             % find maximum index of the cross-correlaiton
@@ -303,7 +302,7 @@ switch fftmethod
         D = Img2Partemp(gridx(1):gridx(2),gridy(1):gridy(2),gridz(1):gridz(2));
         % Shrink size C & D
         RDTime = 1;
-        while size(C,1)*size(C,2)*size(C,3)>MaxVoxelNum
+        while size(C,1)*size(C,2)*size(C,3)>maxVoxelNum
             RDTime = RDTime*2;
             C = imgaussfilt3(C); % C = imgaussfilt3(C); C = imgaussfilt3(C);
             D = imgaussfilt3(D); % D = imgaussfilt3(D); D = imgaussfilt3(D);
@@ -327,9 +326,9 @@ switch fftmethod
         end
         % figure, imagesc3D(C); figure, imagesc3D(D);
          
-        if strcmp(fftmethod,'bigxcorr')
+        if strcmp(fftMethod,'bigxcorr')
             XCORRF3OfCD0 = normxcorr3(C,D,'full');
-        elseif strcmp(fftmethod,'bigphasecorr')
+        elseif strcmp(fftMethod,'bigphasecorr')
             XCORRF3OfCD0 = bigPhaseCorr3(C,D,'full');
         end
         % figure, imagesc3D(XCORRF3OfCD0);
@@ -406,7 +405,7 @@ switch fftmethod
                 TotalNo = TotalNo*8;
             end
             xyRatio=gridxWidthNewtemp/gridyWidthNewtemp; xzRatio=gridxWidthNewtemp/gridzWidthNewtemp; yzRatio=gridyWidthNewtemp/gridzWidthNewtemp;
-            if ( gridxWidthNewtemp<max([1*winsize(1),MinSearchWS]) || gridyWidthNewtemp<max([1*winsize(2),MinSearchWS]) || gridzWidthNewtemp<max([1*winsize(3),MinSearchWS]) )
+            if ( gridxWidthNewtemp<max([1*winsize(1),minSearchWindowSize]) || gridyWidthNewtemp<max([1*winsize(2),minSearchWindowSize]) || gridzWidthNewtemp<max([1*winsize(3),minSearchWindowSize]) )
                 break
             end
         end
@@ -600,7 +599,7 @@ switch fftmethod
                 C = Img1Partemp(gridx_fNew(tempi,1):gridx_fNew(tempi,2), ...
                     gridy_fNew(tempi,1):gridy_fNew(tempi,2), ...
                     gridz_fNew(tempi,1):gridz_fNew(tempi,2) );
-                if (size(C,1)*size(C,2)*size(C,3)>MinSearchWS^3)
+                if (size(C,1)*size(C,2)*size(C,3)>minSearchWindowSize^3)
                     D = Img2Partemp(gridx_gNew(tempi,1):gridx_gNew(tempi,2), ...
                         gridy_gNew(tempi,1):gridy_gNew(tempi,2), ...
                         gridz_gNew(tempi,1):gridz_gNew(tempi,2) );
@@ -611,7 +610,7 @@ switch fftmethod
                 end
                 
                 RDTime = 1;
-                while size(C,1)*size(C,2)*size(C,3)>MaxVoxelNum
+                while size(C,1)*size(C,2)*size(C,3)>maxVoxelNum
                     C = imgaussfilt3(C); C = imgaussfilt3(C); C = imgaussfilt3(C);
                     D = imgaussfilt3(D); D = imgaussfilt3(D); D = imgaussfilt3(D);
                     RDTime = RDTime*2;
@@ -637,9 +636,9 @@ switch fftmethod
                 % figure, imagesc3D(Img1Partemp); figure, imagesc3D(Img2Partemp);
           
                 % cross-correlation
-                if strcmp(fftmethod,'bigxcorr') 
+                if strcmp(fftMethod,'bigxcorr') 
                      XCORRF3OfCD0 = normxcorr3(C,D,'full');
-                elseif strcmp(fftmethod,'bigphasecorr')
+                elseif strcmp(fftMethod,'bigphasecorr')
                     XCORRF3OfCD0 = bigPhaseCorr3(C,D,'full');
                 end
                 % figure, imagesc3D(XCORRF3OfCD0);
@@ -665,7 +664,7 @@ switch fftmethod
                 
             end
             
-            if ( gridxWidthNew<max([1*winsize(1),MinSearchWS]) || gridyWidthNew<max([1*winsize(2),MinSearchWS]) || gridzWidthNew<max([1*winsize(3),MinSearchWS]) )
+            if ( gridxWidthNew<max([1*winsize(1),minSearchWindowSize]) || gridyWidthNew<max([1*winsize(2),minSearchWindowSize]) || gridzWidthNew<max([1*winsize(3),minSearchWindowSize]) )
                 % Finish qfactor computation
                 for k=1:2
                     qf_ = (qfactors(:,k)-min(qfactors(:,k)));
@@ -780,30 +779,33 @@ switch fftmethod
         [indy]=find(tempy>min(yList) & tempy<max(yList));
         [indz]=find(tempz>min(zList) & tempz<max(zList));
         [indxyz] = intersect(intersect(indx,indy),indz);
-
-        % ============== HEADLESS PATCH (benchmark shadow copy) =============
-        % On small volumes (e.g. 64^3 with winsize 14-18) the strict
-        % open-interval filter above can leave indxyz EMPTY (all multigrid
-        % block centers fall outside (min,max) of the node lists), and
-        % scatteredInterpolant then silently returns EMPTY grids -> the
-        % caller crashes later in inpaint_nans3. Relax to all points when
-        % starved; fall back to a constant (median) fill when a 3-D
-        % natural-neighbor triangulation is impossible. Original Global_DVC
-        % sources are unmodified; this copy shadows them via the benchmark
-        % path (see HEADLESS_README.md). The unused regularizeNd duplicates
-        % uGrid2/vGrid2/wGrid2 are dropped (they crash on starved point sets
-        % and their results were never read).
-        if numel(indxyz) < 10
-            indxyz = (1:numel(tempx))';
-        end
+        
+        gridPoints = {xList, yList, zList}; smoothness=1e-3;
+        uGrid2 = regularizeNd([tempx(indxyz),tempy(indxyz),tempz(indxyz)],tempu(indxyz),gridPoints, smoothness);
+        
         [xGrid,yGrid,zGrid]=ndgrid(xList,yList,zList);
-        uGrid    = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempu(indxyz),  xGrid,yGrid,zGrid); 
-        vGrid    = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempv(indxyz),  xGrid,yGrid,zGrid); 
-        wGrid    = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempw(indxyz),  xGrid,yGrid,zGrid); 
-        PhiGrid  = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempPhi(indxyz),xGrid,yGrid,zGrid); 
-        qf_1Grid = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_1(indxyz),   xGrid,yGrid,zGrid); 
-        qf_2Grid = local_scatterToGrid(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_2(indxyz),   xGrid,yGrid,zGrid); 
-        % ============== END HEADLESS PATCH ==================================
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempu(indxyz),'natural','nearest');
+        uGrid=F(xGrid,yGrid,zGrid);
+        %uGrid=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempu(indxyz),xGrid,yGrid,zGrid,'natural');
+        vGrid2 = regularizeNd([tempx(indxyz),tempy(indxyz),tempz(indxyz)],tempv(indxyz),gridPoints, smoothness);
+        
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempv(indxyz),'natural','nearest');
+        vGrid=F(xGrid,yGrid,zGrid);
+        %vGrid=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempv(indxyz),xGrid,yGrid,zGrid,'natural');
+        wGrid2 = regularizeNd([tempx(indxyz),tempy(indxyz),tempz(indxyz)],tempw(indxyz),gridPoints, smoothness);
+        
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempw(indxyz),'natural','nearest');
+        wGrid=F(xGrid,yGrid,zGrid);
+        %wGrid=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempw(indxyz),xGrid,yGrid,zGrid,'natural');
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempPhi(indxyz),'natural','nearest');
+        PhiGrid=F(xGrid,yGrid,zGrid);
+        %PhiGrid=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),tempPhi(indxyz),xGrid,yGrid,zGrid,'natural');
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_1(indxyz),'natural','nearest');
+        qf_1Grid=F(xGrid,yGrid,zGrid);
+        %[qf_1Grid]=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_1(indxyz),xGrid,yGrid,zGrid,'natural');
+        F=scatteredInterpolant(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_2(indxyz),'natural','nearest');
+        qf_2Grid=F(xGrid,yGrid,zGrid);
+        %[qf_2Grid]=griddata(tempx(indxyz),tempy(indxyz),tempz(indxyz),qf_2(indxyz),xGrid,yGrid,zGrid,'natural');
         
         cc.max = PhiGrid; cc.A = []; cc.qfactors =[qf_1Grid(:),qf_2Grid(:)];
         
@@ -1174,22 +1176,4 @@ ppe = 1/entropy; %peak to cc (information) entropy
 
 end
 
-%% ========= HEADLESS PATCH helper (benchmark shadow copy) =========
-function G = local_scatterToGrid(x,y,z,vals,xG,yG,zG)
-% Natural-neighbor scattered interpolation with nearest extrapolation;
-% falls back to a constant median fill when the point set cannot support
-% a 3-D triangulation (too few / degenerate points on small volumes).
-G = [];
-if numel(vals) >= 4
-    try
-        F = scatteredInterpolant(double(x(:)),double(y(:)),double(z(:)), ...
-                                 double(vals(:)),'natural','nearest');
-        G = F(xG,yG,zG);
-    catch
-        G = [];
-    end
-end
-if isempty(G) || ~isequal(size(G),size(xG))
-    G = median(double(vals(:)),'omitnan')*ones(size(xG));
-end
-end
+

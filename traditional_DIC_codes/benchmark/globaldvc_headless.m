@@ -1,4 +1,7 @@
 function result = globaldvc_headless(cfgFile)
+% RAFT-DVC: resolution-aware learned digital volume correlation.
+% Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+% Released under the MIT License; see LICENSE at the repository root.
 % GLOBALDVC_HEADLESS  Non-interactive batch wrapper around FE-Global-DVC.
 %
 %   result = globaldvc_headless(cfgFile)
@@ -9,6 +12,12 @@ function result = globaldvc_headless(cfgFile)
 %       winstepsize : 1x3 finite element size in voxels, e.g. [8,8,8]
 %       alpha       : regularization coefficient (|grad u|^2), e.g. 80
 %       outFile     : path of output .mat to write
+%       fast        : OPTIONAL, default true. true = vectorized FE assembly
+%                     (benchmark\funGlobalICGN3_fast.m, ~order-of-magnitude
+%                     faster, equivalent to reduction-order rounding; see
+%                     validate_optimizations.m). false = original per-voxel
+%                     assembly (benchmark shadow of funGlobalICGN3, waitbars
+%                     stripped, numerics untouched).
 %
 %   Reproduces main_FE_GlobalDVC.m Sections 1-4 (displacement only, no strain,
 %   no plotting, no prompts). Pinned parameters:
@@ -53,6 +62,8 @@ assert(isfield(cfg,'refFile') && isfield(cfg,'defFile') && ...
 winstepsize = double(cfg.winstepsize(:)');  assert(numel(winstepsize)==3);
 winsize     = winstepsize + [6,6,6];        % ReadImage3.m line 111 convention
 alpha       = double(cfg.alpha);
+useFast     = true;                         % default: vectorized FE assembly
+if isfield(cfg,'fast'), useFast = logical(cfg.fast); end
 
 %% ---------- Load volumes (first variable convention) ----------
 ImgRef = local_loadVol(cfg.refFile);
@@ -110,8 +121,13 @@ fprintf('--- [globaldvc_headless] Section 4: global IC-GN, alpha=%g ---\n',alpha
 tStart = tic;
 % alphaList = [alpha]  -- pinned; the original main line 126 unconditionally
 % overrides alphaList with an L-curve sweep. We run one alpha only.
-[U,normOfW,timeICGN] = funGlobalICGN3(DVCmesh,Df,Img{1},Img{2},U0,alpha, ...
-                                      DVCpara.tol,DVCpara.maxIter);
+if useFast
+    [U,normOfW,timeICGN] = funGlobalICGN3_fast(DVCmesh,Df,Img{1},Img{2},U0,alpha, ...
+                                               DVCpara.tol,DVCpara.maxIter);
+else
+    [U,normOfW,timeICGN] = funGlobalICGN3(DVCmesh,Df,Img{1},Img{2},U0,alpha, ...
+                                          DVCpara.tol,DVCpara.maxIter);
+end
 tGlobalICGN = toc(tStart);
 
 %% ---------- Save results ----------

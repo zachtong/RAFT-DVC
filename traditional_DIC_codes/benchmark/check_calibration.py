@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Read the axis-calibration outputs (data/calib_out_axis{0,1,2}.mat) produced
 by aldvc_headless and report, for each numpy-axis shift, the median value of
 each DVC displacement component (u,v,w) of U_local and U_aldvc.

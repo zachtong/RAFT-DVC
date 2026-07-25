@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Phase-1 evaluation entry point.
 
 Loads a trained checkpoint, evaluates on the `test/` split of a Phase-1
@@ -310,7 +313,7 @@ def main() -> None:
     print(f"[eval] metrics written : {out_dir}/metrics.csv")
     print(f"[eval] summary         : {out_dir}/summary.json")
 
-    # PDF report (CLAUDE.md testing policy)
+    # Visual PDF summary of the evaluation
     pdf_name = f"phase1_{args.experiment_name}_{args.data_config}_{date.today().isoformat()}.pdf"
     pdf_path = args.reports_dir / pdf_name
     _write_pdf_report(

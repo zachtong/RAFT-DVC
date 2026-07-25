@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """CUDA-backed on-the-fly 3D correlation lookup.
 
 Loads the compiled CUDA extension on first use (JIT via

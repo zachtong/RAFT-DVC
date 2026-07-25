@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Evaluate the smoke-test DVC outputs against analytic ground truth.
 
 Reads data/smoke_out_aldvc.mat (U_local, U_aldvc) and

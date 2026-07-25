@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Convert a RAFT-DVC sample .npz (keys I1, I2) into ref.mat / def.mat for the
 headless MATLAB DVC wrappers (aldvc_headless.m / globaldvc_headless.m).
 

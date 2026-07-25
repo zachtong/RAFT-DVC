@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Evaluate the headless DVC outputs on the real r8 128^3 sample against the
 GT 'flow' stored in the npz (shape (3,128,128,128), components along numpy
 axes 0,1,2).

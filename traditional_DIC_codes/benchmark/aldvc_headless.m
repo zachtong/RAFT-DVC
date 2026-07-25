@@ -1,4 +1,7 @@
 function result = aldvc_headless(cfgFile)
+% RAFT-DVC: resolution-aware learned digital volume correlation.
+% Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+% Released under the MIT License; see LICENSE at the repository root.
 % ALDVC_HEADLESS  Non-interactive batch wrapper around the ALDVC pipeline.
 %
 %   result = aldvc_headless(cfgFile)
@@ -9,10 +12,17 @@ function result = aldvc_headless(cfgFile)
 %       winsize     : 1x3 subset size in voxels, e.g. [16,16,16]
 %       winstepsize : 1x3 subset step  in voxels, e.g. [8,8,8]
 %       outFile     : path of output .mat to write
+%       clusterNo   : OPTIONAL, default 12. Number of parallel workers for
+%                     the per-node IC-GN loops (LocalICGN3/Subpb13 shadow
+%                     copies in benchmark\). 0 or 1 = serial (original
+%                     behavior). >1 opens a persistent parpool ONCE and
+%                     reuses it across calls. Parallel results are
+%                     numerically identical to serial (validated by
+%                     validate_optimizations.m).
 %
 %   Reproduces main_ALDVC.m Sections 1-6 (displacement only, no strain,
 %   no plotting, no prompts). Pinned parameters:
-%       interpMethod='cubic', clusterNo=1, initFFTMethod='bigxcorr',
+%       interpMethod='cubic', initFFTMethod='bigxcorr',
 %       trackingMode='cumulative', Subpb2FDOrFEM='finiteDifference',
 %       ICGNtol=1e-2, Subpb1ICGNMaxIterNum=50, ALVarMu=1e-3,
 %       single beta = 1e-2*mean(winstepsize)^2*ALVarMu (no L-curve),
@@ -54,6 +64,21 @@ assert(isfield(cfg,'refFile') && isfield(cfg,'defFile') && ...
 
 winsize     = double(cfg.winsize(:)');      assert(numel(winsize)==3);
 winstepsize = double(cfg.winstepsize(:)');  assert(numel(winstepsize)==3);
+clusterNo   = 12;                           % default: parallel IC-GN, 12 workers
+if isfield(cfg,'clusterNo'), clusterNo = double(cfg.clusterNo); end
+assert(isscalar(clusterNo) && clusterNo>=0, 'clusterNo must be a scalar >= 0');
+
+% ---- Persistent parallel pool (opened once, reused across calls) ----
+if clusterNo > 1
+    if isempty(gcp('nocreate'))
+        fprintf('--- [aldvc_headless] opening persistent parpool(Processes,%d) ---\n',clusterNo);
+        parpool('Processes',clusterNo);
+    end
+    % Sync worker paths with the freshly rebuilt client path so workers
+    % resolve the SAME functions (benchmark shadows first, working
+    % ba_interp3 mex) even if the pool predates this call.
+    fSync = parfevalOnAll(@path,0,path); wait(fSync);
+end
 
 %% ---------- Load volumes (first variable convention) ----------
 ImgRef = local_loadVol(cfg.refFile);
@@ -68,7 +93,8 @@ DVCpara.gridRange            = struct('gridxRange',[1,size(ImgRef,1)], ...
                                       'gridyRange',[1,size(ImgRef,2)], ...
                                       'gridzRange',[1,size(ImgRef,3)]);
 DVCpara.Subpb2FDOrFEM        = 'finiteDifference';
-DVCpara.clusterNo            = 1;        % MUST be 1 ('case 0||1' bug: 0 falls into parfor)
+DVCpara.clusterNo            = clusterNo; % 0/1 = serial; >1 = parfor (benchmark
+                                          % shadow copies fix the 'case 0||1' bug)
 DVCpara.imgSize              = size(ImgRef);
 DVCpara.trackingMode         = 'cumulative';
 DVCpara.initFFTMethod        = 'bigxcorr';
@@ -93,7 +119,14 @@ clear ImgRef ImgDef ImgNorm1 ImgNorm2;
 %% ---------- Section 3: FFT integer search initial guess ----------
 fprintf('--- [aldvc_headless] Section 3: integer search ---\n');
 tStart = tic;
-[xyz0,uvw0,cc,sizeOfFFTSearchRegion] = IntegerSearch3Multigrid(Img,DVCpara); %#ok<ASGLU>
+% Call the whole-ROI multigrid branch directly ('bigxcorr' literal). The stock
+% IntegerSearch3Multigrid wrapper translates initFFTMethod='bigxcorr' into the
+% windowed per-subset search (range ~ +/- winsize/2), which caps the largest
+% recoverable displacement; the literal 'bigxcorr' case runs a global
+% cross-correlation first and is displacement-range free.
+[xyz0,uvw0,cc] = funIntegerSearch3Multigrid(Img,DVCpara.gridRange, ...
+    DVCpara.winsize,DVCpara.winstepsize,'bigxcorr');
+sizeOfFFTSearchRegion = 0;
 DVCpara.sizeOfFFTSearchRegion = sizeOfFFTSearchRegion;
 cc.ccThreshold = 1.25;
 [uvw,cc] = RemoveOutliers3_headless(uvw0,cc,DVCpara.medianFilterThreshold);

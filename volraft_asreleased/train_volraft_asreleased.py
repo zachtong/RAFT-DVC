@@ -1,3 +1,7 @@
+# Ported from VolRAFT (https://github.com/hereon-mbs/VolRAFT), MIT License,
+# Copyright (c) 2024 Helmholtz-Zentrum Hereon.
+# Modifications for RAFT-DVC by Zixiang (Zach) Tong <zachtong@utexas.edu>,
+# University of Texas at Austin. Released under the MIT License; see LICENSE.
 """Train "VolRAFT architecture, sampler FIXED" on OUR Phase-1/paper-1 data.
 
 Architecture: the released VolRAFT variant (small=True encoder: fnet out 128,

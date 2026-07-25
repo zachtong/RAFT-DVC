@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Regression tests for the correlation-sampler axis convention.
 
 Background (2026-07-12): bilinear_sampler_3d historically swapped the W and D

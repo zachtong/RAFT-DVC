@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Profile RAFT-DVC peak GPU memory across (encoder, size, batch, iters, corr_impl) configs.
 
 Useful for planning training runs: which batch sizes fit, where OTF gives

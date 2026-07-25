@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """
 DIC shape-function deformation generators (0/1/2-order polynomial).
 
@@ -133,6 +136,23 @@ def _max_abs_inf(flow):
     return float(np.max(np.abs(flow))) if flow.size > 0 else 0.0
 
 
+def _max_norm(flow, norm="linf"):
+    """Max displacement over voxels under the chosen norm.
+
+    norm='linf' : max over voxels+components of |u_i| (the original convention;
+                  the max any single axis moves).
+    norm='l2'   : max over voxels of the Euclidean ||u|| = sqrt(sum_i u_i^2)
+                  -- the PHYSICAL displacement magnitude, i.e. how far a bead
+                  actually moves. This is the operating-box reach axis (paper-2).
+    flow is (3, D, H, W).
+    """
+    if flow.size == 0:
+        return 0.0
+    if norm == "l2":
+        return float(np.sqrt((flow ** 2).sum(axis=0)).max())
+    return float(np.max(np.abs(flow)))
+
+
 # -----------------------------------------------------------------------------
 # Main sampler
 # -----------------------------------------------------------------------------
@@ -154,10 +174,11 @@ class DeformationSampler:
 
     TYPES = ('translation', 'affine', 'quadratic')
 
-    def __init__(self, volume_shape, type_probs=(0.10, 0.45, 0.45)):
+    def __init__(self, volume_shape, type_probs=(0.10, 0.45, 0.45), norm="linf"):
         self.volume_shape = tuple(int(s) for s in volume_shape)
         self.center = (np.array(self.volume_shape, dtype=np.float32) - 1.0) / 2.0
         self.type_probs = np.asarray(type_probs, dtype=np.float64)
+        self.norm = norm            # 'linf' (paper-1 default) or 'l2' (paper-2 box)
         if not np.isclose(self.type_probs.sum(), 1.0):
             raise ValueError(
                 f"type_probs must sum to 1 (got {self.type_probs.sum()})"
@@ -193,7 +214,7 @@ class DeformationSampler:
 
         # Evaluate on the input-volume grid to measure current max
         flow_grid_base = eval_flow_on_grid(flow_fn_base, self.volume_shape)
-        current_max = _max_abs_inf(flow_grid_base)
+        current_max = _max_norm(flow_grid_base, self.norm)
         if current_max < 1e-6:
             # Degenerate sample; re-draw by scaling from an epsilon
             current_max = 1e-6
@@ -214,7 +235,7 @@ class DeformationSampler:
             scaled_coeffs = {'A': A_s.tolist()}
 
         flow_grid = (flow_grid_base * scale).astype(np.float32)
-        achieved_max = _max_abs_inf(flow_grid)
+        achieved_max = _max_norm(flow_grid, self.norm)
 
         metadata = {
             'deform_type': deform_type,

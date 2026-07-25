@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """On-the-fly (OTF) Phase-1 dataset.
 
 Each worker holds its own ``Phase1SampleGenerator`` and synthesizes a brand

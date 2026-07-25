@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Generate the axis-calibration data for the headless DVC wrappers.
 
 Creates a synthetic 64^3 random-blob volume (gaussian-filtered noise, soft

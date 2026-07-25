@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """Generate a multi-page PDF preview of one or more phase-1 NPZ samples.
 
 Useful for sanity-checking a dataset (bead size, density, displacement

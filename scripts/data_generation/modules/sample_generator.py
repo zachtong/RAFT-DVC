@@ -1,3 +1,6 @@
+# RAFT-DVC: resolution-aware learned digital volume correlation.
+# Zixiang (Zach) Tong <zachtong@utexas.edu>, University of Texas at Austin.
+# Released under the MIT License; see LICENSE at the repository root.
 """
 Phase-1 sample generator: builds (I1, I2, flow) triples with full pipeline.
 
@@ -201,6 +204,7 @@ class Phase1SampleGenerator:
         type_probs=(0.10, 0.45, 0.45),
         input_disp_min=None,
         input_disp_max=None,
+        deform_norm="linf",
     ):
         self.size = int(size)
         self.radius = int(radius)
@@ -256,6 +260,7 @@ class Phase1SampleGenerator:
         self._deform_sampler = DeformationSampler(
             volume_shape=(self.size, self.size, self.size),
             type_probs=self.type_probs,
+            norm=deform_norm,
         )
 
     # -------------------------------------------------------------------------
