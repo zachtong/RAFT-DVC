@@ -191,3 +191,5 @@ volraft_asreleased/__pycache__/
 CLAUDE.md
 AGENTS.md
 .claude/
+# Release staging (assets already published to the GitHub release).
+/_release_*/
