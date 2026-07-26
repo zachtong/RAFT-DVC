@@ -21,6 +21,8 @@ from .extractor import (
     MediumEncoder,
     ShallowEncoder,
     FullResEncoder,
+    LateStrideEncoder,
+    ShallowUpEncoder,
     ContextEncoder
 )
 from .update import BasicUpdateBlock
@@ -197,12 +199,17 @@ class RAFTDVC(nn.Module):
 
         self.config = config or RAFTDVCConfig()
 
-        # Select encoder class based on encoder_type
+        # Encoder class and the stride of the grid the flow is solved on. The
+        # two are listed together because the control variants decouple them:
+        # '1/2-late-stride' convolves at full resolution but outputs stride 2,
+        # '1/1-shallow-up' convolves at stride 2 but outputs full resolution.
         encoder_map = {
-            '1/1': FullResEncoder,
-            '1/2': ShallowEncoder,
-            '1/4': MediumEncoder,
-            '1/8': BasicEncoder
+            '1/1': (FullResEncoder, 1),
+            '1/2': (ShallowEncoder, 2),
+            '1/4': (MediumEncoder, 4),
+            '1/8': (BasicEncoder, 8),
+            '1/2-late-stride': (LateStrideEncoder, 2),
+            '1/1-shallow-up': (ShallowUpEncoder, 1),
         }
 
         if self.config.encoder_type not in encoder_map:
@@ -211,7 +218,7 @@ class RAFTDVC(nn.Module):
                 f"Must be one of: {list(encoder_map.keys())}"
             )
 
-        encoder_class = encoder_map[self.config.encoder_type]
+        encoder_class, _enc_stride = encoder_map[self.config.encoder_type]
 
         # Feature encoder (shared for both volumes)
         self.fnet = encoder_class(
@@ -251,8 +258,9 @@ class RAFTDVC(nn.Module):
         # For mixed precision training
         self._use_amp = self.config.mixed_precision
 
-        # Compute downsample factor based on encoder type
-        self.downsample_factor = int(self.config.encoder_type.split('/')[1])
+        # Stride of the grid the flow is solved on (not parsed from the name:
+        # the control variants deliberately break the '1/N' naming).
+        self.downsample_factor = _enc_stride
     
     def freeze_bn(self):
         """Freeze batch normalization layers."""

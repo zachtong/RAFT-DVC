@@ -523,6 +523,49 @@ class ShallowEncoder(nn.Module):
         return x
 
 
+class LateStrideEncoder(ShallowEncoder):
+    """1/2-resolution output, but every residual layer runs at full resolution.
+
+    Control C1 for the f=1 floor study. ShallowEncoder downsamples in its very
+    first convolution and does all of its work on the pooled grid; this variant
+    keeps the identical module list and parameter count and only moves the
+    stride-2 to the last residual layer, so the same capacity is spent at full
+    resolution and the pooling happens at the end. Output stride is 2, matching
+    ShallowEncoder, which isolates "where the convolutions run" from "what grid
+    the flow is solved on".
+    """
+
+    def __init__(self, input_dim=1, output_dim=128, norm_fn='instance', dropout=0.0):
+        super().__init__(input_dim, output_dim, norm_fn, dropout)
+        # Same layers, stride moved from conv1 to layer3.
+        self.conv1 = nn.Conv3d(input_dim, 32, kernel_size=7, stride=1, padding=3)
+        self.in_planes = 32
+        self.layer1 = self._make_layer(32, stride=1)    # /1
+        self.layer2 = self._make_layer(64, stride=1)    # /1
+        self.layer3 = self._make_layer(96, stride=2)    # /2  <- pooling last
+        self._init_weights()
+
+
+class ShallowUpEncoder(ShallowEncoder):
+    """Full-resolution output from convolutions that ran at 1/2 resolution.
+
+    Control C2 for the f=1 floor study. Identical to ShallowEncoder, including
+    the initial stride-2 and the parameter count, with a trilinear x2 upsample
+    appended so the feature map, and therefore the flow, lands on the full
+    voxel grid. Pairs with LateStrideEncoder to complete a 2x2: flow grid
+    (f = 1 or 2) crossed with convolution resolution (full or half).
+    """
+
+    def forward(self, x):
+        is_list = isinstance(x, (tuple, list))
+        y = super().forward(x)
+        if is_list:
+            return tuple(F.interpolate(t, scale_factor=2.0, mode='trilinear',
+                                       align_corners=True) for t in y)
+        return F.interpolate(y, scale_factor=2.0, mode='trilinear',
+                             align_corners=True)
+
+
 class FullResEncoder(nn.Module):
     """
     Full resolution 3D encoder with 1/1 resolution output (no downsampling).

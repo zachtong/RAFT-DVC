@@ -1,0 +1,34 @@
+# Control encoder for the f=1 precision-floor study.
+# C1: convolutions at full resolution, flow on the 1/2 grid
+#
+# Identical to raft_dvc_1_2_p2_r4.yaml in every field except encoder_type, and
+# the encoder itself has the same modules and the same 93,792 parameters as
+# ShallowEncoder; only the position of the stride-2 differs. Paired with the
+# released s2 arm (encoder_type "1/2") and the f=1 arm, the four form a 2x2 of
+# {flow grid} x {resolution the convolutions run at}.
+
+name: "RAFT-DVC-ctrl-late_stride"
+description: >
+  C1: convolutions at full resolution, flow on the 1/2 grid
+
+architecture:
+  encoder_type: "1/2-late-stride"
+
+  input_channels: 1
+  feature_dim: 128
+  encoder_norm: "instance"
+  encoder_dropout: 0.0
+
+  hidden_dim: 96
+  context_dim: 64
+  context_norm: "none"
+  context_dropout: 0.0
+
+  corr_levels: 2
+  corr_radius: 4
+
+  use_sep_conv: true
+  iters: 12
+
+metadata:
+  downsample_factor: 2
