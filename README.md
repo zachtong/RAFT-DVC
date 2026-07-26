@@ -1,5 +1,7 @@
 # RAFT-DVC
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21578266.svg)](https://doi.org/10.5281/zenodo.21578266)
+
 Resolution-aware learned digital volume correlation for particle-labeled
 volumes. This repository contains the reference implementation, the three
 trained solvers, the synthetic-volume generator, and the headless drivers for
@@ -125,6 +127,9 @@ upstream MIT license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
   year    = {2026}
 }
 ```
+
+The archived v1.0 release: doi:10.5281/zenodo.21578267 (concept DOI
+10.5281/zenodo.21578266 always resolves to the latest version).
 
 The real confocal indentation volume used for validation comes from the DVC
 Challenge 2.0 dataset (doi:10.21203/rs.3.rs-9683321/v1).
