@@ -118,13 +118,17 @@ upstream MIT license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Citation
 
+Preprint, currently under review. Please cite the arXiv version:
+
 ```bibtex
-@article{tong2026raftdvc,
-  author  = {Tong, Zixiang and Bu, Lehu and Yang, Jin},
-  title   = {{RAFT-DVC}: A resolution-aware framework for learned digital
-             volume correlation in particle-labeled volumes},
-  journal = {Acta Mechanica Sinica},
-  year    = {2026}
+@misc{tong2026raftdvc,
+  author        = {Tong, Zixiang and Bu, Lehu and Yang, Jin},
+  title         = {{RAFT-DVC}: Resolution-Aware Machine Learning-Based Digital Volume Correlation},
+  year          = {2026},
+  eprint        = {2609.01876},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CV},
+  url           = {https://arxiv.org/abs/2609.01876}
 }
 ```
 
